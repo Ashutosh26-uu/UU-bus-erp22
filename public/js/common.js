@@ -24,6 +24,7 @@ export class ApiError extends Error {
 
 export const api = {
   csrf: null,
+  liveMode: 'sse',
   extraHeaders: {},
   onUnauthenticated: null,
   async request(method, url, body, { raw = false } = {}) {
@@ -148,8 +149,50 @@ export const theme = {
 };
 theme.init();
 
-// ------------------------------------------------------------------ live events (SSE)
+// ------------------------------------------------------------------ live events (SSE or polling)
+/** Same handlers either way: the server says which transport it uses (api.liveMode from /api/auth/me). */
 export function liveEvents(handlers, onStatus) {
+  return api.liveMode === 'poll' ? pollLive(handlers, onStatus) : sseLive(handlers, onStatus);
+}
+
+/** Serverless deployments: ask for new events every few seconds (slower when the tab is hidden). */
+function pollLive(handlers, onStatus) {
+  let cursor = 0;
+  let stopped = false;
+  let timer = null;
+  let inflight = false;
+  let failures = 0;
+  const VISIBLE_MS = 2500;
+  const HIDDEN_MS = 15000;
+  const schedule = (ms) => { clearTimeout(timer); if (!stopped) timer = setTimeout(tick, ms); };
+  async function tick() {
+    if (stopped || inflight) return;
+    inflight = true;
+    try {
+      const r = await api.get(`/api/events/poll?after=${cursor}`);
+      for (const ev of r.events) {
+        const fn = handlers[ev.type];
+        if (fn) { try { fn(ev.data); } catch (err) { console.error('event handler failed', ev.type, err); } }
+      }
+      cursor = r.cursor;
+      failures = 0;
+      onStatus?.(true);
+    } catch (e) {
+      failures++;
+      onStatus?.(false);
+      if (e.status === 401) { stopped = true; return; }
+    } finally {
+      inflight = false;
+    }
+    schedule(failures ? Math.min(VISIBLE_MS * 2 ** failures, 20000) : document.hidden ? HIDDEN_MS : VISIBLE_MS);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !inflight) schedule(0); });
+  tick();
+  return { stop() { stopped = true; clearTimeout(timer); } };
+}
+
+/** Single long-running server: one Server-Sent Events stream, instant updates. */
+function sseLive(handlers, onStatus) {
   let es = null;
   let stopped = false;
   let retry = 1000;
@@ -217,6 +260,7 @@ export async function requireStaff(roles) {
   let me;
   try { me = await api.get('/api/auth/me'); } catch (e) { if (e.status === 401) return null; throw e; }
   api.csrf = me.csrf;
+  api.liveMode = me.live || 'sse';
   if (roles && !roles.includes(me.user.role)) { location.href = '/'; return null; }
   if (me.user.mustChangePassword) await forcePasswordChange();
   return me.user;

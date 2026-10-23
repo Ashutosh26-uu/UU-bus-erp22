@@ -548,17 +548,18 @@ async function renderSettings() {
   content.innerHTML = `
     <div class="grid cols-2">
       <div class="card stack">
-        <div><h2>QR link address</h2><p class="muted small">The QR code encodes this address. Student phones must be able to open it, so on a local network it is your computer's Wi-Fi IP; in production it is your https domain.</p></div>
+        <div><h2>QR link address</h2><p class="muted small">The QR codes encode this address. Student phones must be able to open it: ${s.serverless ? 'on Vercel that is your production domain (custom domain if you added one).' : "on a local network it is your computer's Wi-Fi IP; in production it is your https domain."}</p></div>
         <form id="setForm" class="stack">
-          <div class="field"><label>Public base URL</label><input class="input mono" name="base_url" value="${esc(s.base_url)}" placeholder="http://${esc(s.lanIp)}:${s.port}"><div class="help">Leave empty to auto-detect (${esc(s.envBaseUrl || `http://${s.lanIp}:${s.port}`)}).</div></div>
+          <div class="field"><label>Public base URL</label><input class="input mono" name="base_url" value="${esc(s.base_url)}" placeholder="${s.serverless ? 'https://bus.your-college.edu' : `http://${esc(s.lanIp)}:${s.port}`}"><div class="help">Leave empty to auto-detect (${esc(s.envBaseUrl || (s.serverless ? 'the Vercel production domain' : `http://${s.lanIp}:${s.port}`))}).</div></div>
           <div class="card soft small">Currently in use: <code>${esc(s.effectiveBaseUrl)}</code></div>
           <div class="error-text" data-error hidden></div>
           <button class="btn primary" type="submit">Save</button>
         </form>
       </div>
       <div class="card stack">
-        <div><h2>Security profile</h2><p class="muted small">Set in <code>.env</code> and applied at start.</p></div>
+        <div><h2>Security profile</h2><p class="muted small">Set in ${s.serverless ? 'the Vercel environment variables' : '<code>.env</code>'} and applied at start.</p></div>
         <div class="feed">
+          <div class="feed-item"><div class="meta"><span class="name">${s.serverless ? 'Serverless (Vercel)' : 'Single server'} · ${s.database === 'turso' ? 'Turso database' : s.database === 'sqlite' ? 'local SQLite file' : 'libSQL file'}</span><span class="sub">Live updates ${s.liveMode === 'poll' ? 'arrive by polling every ~2.5 s' : 'are pushed instantly'}.</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">QR rotates every ${s.qrRotateSec}s</span><span class="sub">A screenshot or forwarded link stops working within ${s.qrRotateSec * 2}s.</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">${s.checkinMinutes} minute check-in window</span><span class="sub">After scanning, the student must finish within this time.</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">One phone = one student</span><span class="sub">A phone is linked to the first student who boards with it. Max ${s.maxDevicesPerStudent} phones per student per 30 days.</span></div></div>

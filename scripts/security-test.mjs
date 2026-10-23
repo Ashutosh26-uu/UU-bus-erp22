@@ -46,6 +46,8 @@ let r = await call(admin, 'POST', '/api/auth/login', { username: 'admin', passwo
 if (r.status !== 200) { console.error('admin login failed:', r.data); process.exit(2); }
 ok(true, 'admin login');
 const csrf = { 'X-CSRF-Token': r.data.csrf, Origin: BASE };
+const LIVE = r.data.live;
+console.log(`  (server live mode: ${LIVE})`);
 
 const allBuses = (await call(admin, 'GET', '/api/admin/buses')).data.buses.filter((b) => b.active);
 const bus12 = allBuses.find((b) => b.number === '12');
@@ -63,7 +65,7 @@ const S = { aditi: [on12[0].uuid, on12[0].name], rahul: [on12[1].uuid, on12[1].n
 const ids = { aditi: on12[0].id, rahul: on12[1].id, priya: on12[2].id, arjun: on12[3].id, tanvi: onOther[0].id };
 for (const id of Object.values(ids)) await call(admin, 'POST', `/api/admin/students/${id}/devices/reset`, {}, csrf);
 const users = (await call(admin, 'GET', '/api/admin/users')).data.items;
-for (const u of users.filter((x) => x.username === 'locktest' || x.username === 'testincharge12')) await call(admin, 'DELETE', `/api/admin/users/${u.id}`, undefined, csrf);
+for (const u of users.filter((x) => ['locktest', 'testincharge12', 'testinchargex'].includes(x.username))) await call(admin, 'DELETE', `/api/admin/users/${u.id}`, undefined, csrf);
 
 console.log('\n[fleet]');
 ok(allBuses.length >= 19, `fleet has 19 buses (found ${allBuses.length})`);
@@ -125,7 +127,7 @@ r = await call(jar(), 'POST', '/api/checkin/session', { token: await freshToken(
 ok(r.status === 410, 'bus 12 token presented on another bus link -> 410', r.status);
 r = await call(jar(), 'POST', '/api/checkin/session', { token: await freshToken(), bus: '12' });
 ok(r.status === 200, 'bus 12 token on the bus 12 link -> ok', r.status);
-const rawTrip = get('SELECT * FROM trips WHERE id = ?', trip.id);
+const rawTrip = await get('SELECT * FROM trips WHERE id = ?', trip.id);
 r = await call(jar(), 'POST', '/api/checkin/session', { token: tokenFor(rawTrip, Date.now() - 120_000) });
 ok(r.status === 410, 'token from 2 minutes ago -> 410 (screenshots defeated)', r.status);
 r = await call(jar(), 'POST', '/api/checkin/session', { token: tokenFor(rawTrip, Date.now() + 60_000) });
@@ -153,10 +155,34 @@ ok(r.status === 400 && r.data.code === 'NO_STUDENT', 'confirm before lookup -> 4
 r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: ` ${S.aditi[0].toLowerCase()} `, name: `  ${S.aditi[1].toUpperCase().replace(' ', '   ')} ` });
 ok(r.status === 200 && r.data.student.uuid === S.aditi[0] && r.data.student.name === S.aditi[1] && r.data.student.stop, 'messy case/spacing matches; details come from DB');
 
-// ---------------------------------------------------------------- anti-proxy
-console.log('\n[anti-proxy]');
+// ---------------------------------------------------------------- anti-proxy (+ live events)
+console.log('\n[anti-proxy & live events]');
+// an incharge of another bus, to prove they do not receive bus 12's events
+r = await call(admin, 'POST', '/api/admin/users', { username: 'testinchargex', name: 'Test Incharge X', role: 'incharge', bus_id: otherBus.id, password: 'TempInchargeX1' }, csrf);
+const otherInchargeId = r.data.id;
+const inchX = jar();
+r = await call(inchX, 'POST', '/api/auth/login', { username: 'testinchargex', password: 'TempInchargeX1' });
+await call(inchX, 'POST', '/api/auth/change-password', { current: 'TempInchargeX1', next: 'InchargeXfresh1' }, { 'X-CSRF-Token': r.data.csrf, Origin: BASE });
+const cursorOf = async (j) => (await call(j, 'GET', '/api/events/poll?after=0')).data?.cursor; // what browsers send first
+r = await call(admin, 'GET', '/api/events/poll?after=0');
+ok(r.status === 200 && Number.isInteger(r.data.cursor), 'poll: first request (after=0) returns a cursor', r.status);
+r = await call(admin, 'GET', '/api/events/poll?after=abc');
+ok(r.status === 400, 'poll: garbage cursor rejected', r.status);
+const [cA, cI, cX] = [await cursorOf(admin), await cursorOf(inch), await cursorOf(inchX)];
 r = await call(d1, 'POST', '/api/checkin/confirm');
 ok(r.status === 200 && r.data.ok && r.data.flags.length === 0, 'phone D1 boards Aditi');
+if (LIVE === 'poll') {
+  const seen = async (j, c) => (await call(j, 'GET', `/api/events/poll?after=${c}`)).data.events.filter((e) => e.type === 'checkin').map((e) => e.data.checkin.uuid);
+  ok((await seen(admin, cA)).includes(S.aditi[0]), 'poll: admin receives the boarding event');
+  ok((await seen(inch, cI)).includes(S.aditi[0]), 'poll: bus 12 incharge receives the boarding event');
+  ok(!(await seen(inchX, cX)).includes(S.aditi[0]), "poll: another bus's incharge does not receive it");
+  const again = await call(admin, 'GET', `/api/events/poll?after=${(await call(admin, 'GET', `/api/events/poll?after=${cA}`)).data.cursor}`);
+  ok(again.status === 200 && again.data.events.length === 0, 'poll: cursor advances, no duplicates');
+} else {
+  r = await call(admin, 'GET', '/api/events/poll');
+  ok(r.status === 200 && typeof r.data.cursor === 'number', 'poll endpoint answers in SSE mode too');
+}
+await call(admin, 'DELETE', `/api/admin/users/${otherInchargeId}`, undefined, csrf);
 r = await call(d1, 'POST', '/api/checkin/confirm');
 ok(r.status === 409 && r.data.code === 'ALREADY', 'pressing Done twice -> already boarded');
 r = await board(d1, S.rahul);

@@ -14,9 +14,11 @@
     "seed:demo": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
     "reset-admin": "node --disable-warning=ExperimentalWarning scripts/reset-admin.js",
     "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js",
-    "test:security": "node --disable-warning=ExperimentalWarning scripts/security-test.mjs"
+    "test:security": "node --disable-warning=ExperimentalWarning scripts/security-test.mjs",
+    "serve:function": "node --disable-warning=ExperimentalWarning scripts/serve-function.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
     "helmet": "^8.1.0",

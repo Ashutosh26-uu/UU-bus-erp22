@@ -47,6 +47,7 @@ Useful scripts:
 | `npm run reset-admin` | reset the admin password if it is lost |
 | `npm run backup` | consistent copy of the database into `data/backups/` |
 | `npm run test:security` | end-to-end test of every security and portal rule against a running server |
+| `npm run serve:function` | run the Vercel serverless function locally on port 3001 |
 
 ---
 
@@ -90,8 +91,9 @@ Useful scripts:
    5-minute check-in session bound to that phone, and asks for name + student ID.
 4. Both must match the database record. Everything shown (course, year, specialization, stop,
    bus) comes from the server; the phone cannot change it.
-5. **Done** writes the check-in atomically and broadcasts it over Server-Sent Events to the
-   incharge screen and every admin dashboard. The counter animates, the name appears, a flag
+5. **Done** writes the check-in atomically and sends it to the incharge screen and every admin
+   dashboard: instantly over Server-Sent Events on a single server, or within ~2.5 s by polling
+   on Vercel. The counter animates, the name appears, a flag
    is shown if anything is unusual.
 6. **End trip** closes the trip; the QR and all pending sessions die immediately.
 
@@ -134,25 +136,92 @@ Copy `.env.example` to `.env`. Everything is optional.
 | `QR_GRACE_SLOTS` | `1` | how many previous QR windows are still valid |
 | `CHECKIN_MINUTES` | `5` | time a student has to finish after scanning |
 | `MAX_DEVICES_PER_STUDENT` | `2` | phones a student may use in 30 days |
-| `COOKIE_SECURE` | auto | force the `Secure` cookie flag (auto on when `BASE_URL` is https) |
+| `COOKIE_SECURE` | auto | force the `Secure` cookie flag (auto on when `BASE_URL` is https, always on Vercel) |
+| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | unset (local SQLite file) | use a Turso database instead of `data/bus-erp.sqlite`; required on Vercel |
+| `ADMIN_PASSWORD` | unset | password for the first `admin` account (on Vercel the only way to create it without seeding) |
+| `LIVE_MODE` | `sse` locally, `poll` on Vercel | how screens get live updates |
+| `RATE_LIMIT_STORE` | `memory` locally, `db` on Vercel | where login / scan throttles are counted |
+| `SERVERLESS` | auto (`VERCEL` is set) | force serverless behaviour, e.g. for `npm run serve:function` |
 
 ---
 
-## Production deployment
+## Deploy on Vercel
 
-Students usually board on **mobile data**, so for real use the server needs a public HTTPS
-address. Any of these work:
+Students board on **mobile data**, so production needs a public HTTPS address. The repo is
+ready for Vercel: `api/index.js` runs the whole app as one serverless function, `public/` is
+served from Vercel's CDN, and functions are pinned to Mumbai (`bom1`) in `vercel.json`.
 
-* **A small VPS / college server** – run `npm start` under a process manager
+Serverless functions have no disk that survives between requests, so on Vercel the data lives
+in **Turso**, a hosted database that speaks the same SQLite dialect (nothing in the app changes).
+Live updates switch automatically from push to **polling every ~2.5 s**, and login / scan
+throttles are shared through the database so every function instance enforces the same limits.
+
+**1. Create the project**
+
+1. Go to <https://vercel.com/new>, sign in with GitHub and import `Ashutosh26-uu/UU-bus-erp22`.
+   The framework preset comes from `vercel.json` ("Other"); there is no build step.
+2. Before the first deploy, add an environment variable `SESSION_SECRET` with a long random
+   value. Generate one with:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   ```
+   Keep it stable: changing it signs everyone out and invalidates running QR codes.
+
+**2. Connect a Turso database**
+
+In the Vercel project open **Storage → Create / Browse Marketplace → Turso**, create a database
+(pick the **Mumbai / ap-south-1** region, next to the functions) and connect it to the project.
+That adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Then **redeploy** (Deployments → ⋯ →
+Redeploy) so the function picks them up. Until both variables exist, every page shows a short
+"Finish the server setup" checklist instead of failing.
+
+**3. Create the 19 buses and accounts in Turso** (from your computer, once)
+
+```bash
+npx vercel link
+npx vercel env pull .env
+npm run seed:buses
+```
+
+`vercel env pull` writes the Turso URL and token into `.env` (git-ignored); the seed then
+creates the 19 buses, their stops, `admin` and `incharge1` … `incharge19` directly in Turso.
+The passwords are printed and saved to `data/turso-initial-admin.txt` and
+`data/turso-incharge-accounts.txt` (separate from your local files). Instead of seeding you can
+set `ADMIN_PASSWORD` on Vercel: the first request then creates `admin` with that password.
+
+**4. Use it**
+
+Open `https://<your-project>.vercel.app`, sign in as `admin`, change the password, import the
+students (Admin → Students → Import CSV), and give each incharge their line. QR codes use the
+production domain automatically; add a custom domain under Settings → Domains and it is picked
+up the same way (or set it in Admin → Settings → Public base URL).
+
+Good to know:
+
+* **Plan.** Vercel's free Hobby plan is meant for personal, non-commercial projects. For the
+  college's official system use **Pro**. Polling means each open bus screen makes about one
+  request every 2.5 s, roughly 1 million function calls a month for 19 buses boarding about an
+  hour a day. Check current limits on <https://vercel.com/pricing> and <https://turso.tech/pricing>.
+* **Preview deployments** get the same variables unless you scope them. Scope the Turso
+  variables to **Production** if previews must not touch real data.
+* **CSV imports** are limited to about 4 MB per file on Vercel (≈ 30,000 students); split
+  bigger files.
+* **Backups.** Turso keeps point-in-time history; `turso db export` gives a local copy.
+
+**Try serverless mode locally first** (optional): with the Turso variables in `.env`,
+`SERVERLESS=1 npm run serve:function` runs the exact Vercel function on
+<http://localhost:3001>.
+
+## Other hosting
+
+* **A college server / VPS** – `npm start` under a process manager
   (`pm2 start npm --name bus-erp -- start`) behind nginx or Caddy with HTTPS, set
-  `BASE_URL=https://your-domain`, `NODE_ENV=production`, `TRUST_PROXY=1`.
-* **Render / Railway / Fly.io** – deploy the repo, add a persistent disk mounted at `data/`
-  (set `DATA_DIR` if the mount is elsewhere), set the same env vars.
+  `BASE_URL=https://your-domain`, `NODE_ENV=production`, `TRUST_PROXY=1`. Uses the local
+  SQLite file with instant push updates; back up `data/` with `npm run backup`.
+* **Render / Railway / Fly.io** – same as a VPS with a persistent disk mounted at `data/`, or
+  point `TURSO_DATABASE_URL` at Turso and skip the disk.
 * **Quick public test from a laptop** – `cloudflared tunnel --url http://localhost:3000` or
   `ngrok http 3000`, then put the https URL in **Admin → Settings → Public base URL**.
-
-Keep `data/` backed up (`npm run backup` can run from cron / Task Scheduler). The database is
-SQLite in WAL mode, which is safe for a single server and far more than enough for a college.
 
 ---
 
@@ -185,18 +254,22 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 ## Project layout
 
 ```
+api/index.js         Vercel serverless entry (exports the Express app)
+vercel.json          Vercel config: static output, function settings, Mumbai region, rewrites
 src/
-  server.js          Express app, security headers, routes, graceful shutdown
-  config.js          env + LAN detection
-  db.js              SQLite (node:sqlite), schema migrations, housekeeping
+  app.js             Express app: security headers, setup gate, routes, error handling
+  server.js          long-running server for `npm start` (listen, timers, graceful shutdown)
+  config.js          env, serverless detection, LAN detection
+  db.js              async DB layer: node:sqlite locally or Turso/libSQL, migrations, housekeeping
   security.js        scrypt, HMAC, signed values, name/ID normalisation
-  middleware/        session auth + CSRF, device identity, rate limits
-  services/          rotating QR tokens, trips, check-ins (anti-proxy rules), SSE hub, audit, CSV
+  middleware/        session auth + CSRF, device identity, rate limits (memory or DB-shared)
+  services/          rotating QR tokens, trips, check-ins (anti-proxy rules), live events, audit, CSV
   routes/            /api/auth, /api/admin, /api/incharge, /api/checkin
 views/               login, admin, incharge, checkin, 404 pages
 public/              css, js (vanilla ES modules, no build step), icons
-scripts/             fleet (the 19 buses), seed-buses, seed-demo, reset-admin, backup, security-test
-data/                database, secret key, backups (git-ignored)
+scripts/             fleet (the 19 buses), seed-buses, seed-demo, reset-admin, backup,
+                     security-test, serve-function (run the Vercel function locally)
+data/                local database, secret key, credentials, backups (git-ignored)
 ```
 
 ---

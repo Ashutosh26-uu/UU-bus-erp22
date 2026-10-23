@@ -28,15 +28,15 @@ export function homeFor(u) {
 /** Can this user operate this bus's portal? Admins and unassigned incharges can use any bus. */
 export const canAccessBus = (user, busId) => user.role === 'admin' || user.bus_id == null || user.bus_id === busId;
 
-/** Attach req.user / req.session when a valid session cookie is present. Never throws. */
-export function loadSession(req, res, next) {
+/** Attach req.user / req.session when a valid session cookie is present. */
+export async function loadSession(req, res, next) {
   req.cookies = parseCookies(req);
   req.user = null;
   req.session = null;
   const sid = req.cookies[SESSION_COOKIE];
   if (!sid || sid.length > 120) return next();
   const h = sha256(sid);
-  const row = get(
+  const row = await get(
     `SELECT s.csrf, s.expires_at, s.last_seen, s.created_at AS session_created,
             u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password, b.number AS bus_number
        FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN buses b ON b.id = u.bus_id WHERE s.id = ?`,
@@ -44,12 +44,12 @@ export function loadSession(req, res, next) {
   );
   const t = now();
   if (!row || row.expires_at < t || row.session_created + ABSOLUTE_MAX_MS < t || !row.active) {
-    if (row) run('DELETE FROM sessions WHERE id = ?', h);
+    if (row) await run('DELETE FROM sessions WHERE id = ?', h);
     clearCookie(res, SESSION_COOKIE);
     return next();
   }
   if (t - row.last_seen > 60_000) {
-    run('UPDATE sessions SET last_seen = ?, expires_at = ? WHERE id = ?', t, t + config.sessionTtlMs, h);
+    await run('UPDATE sessions SET last_seen = ?, expires_at = ? WHERE id = ?', t, t + config.sessionTtlMs, h);
   }
   req.session = { id: h, csrf: row.csrf };
   req.user = publicUser(row);
