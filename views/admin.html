@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Admin · UU Bus ERP</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" href="/icons/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">ADMIN CONSOLE</span></div></div>
+      <nav class="nav" id="nav" aria-label="Main"></nav>
+      <div class="foot">
+        <div class="row"><div class="avatar" id="meAvatar"></div><div class="grow"><div class="bold truncate" id="meName"></div><div class="xs muted">Administrator</div></div></div>
+        <div class="row">
+          <a class="btn sm ghost grow" href="/incharge" title="Open the bus QR screen as yourself">Bus screen</a>
+          <button class="btn sm ghost" id="pwBtn">Password</button>
+          <button class="btn icon sm ghost" id="logoutBtn" title="Sign out"></button>
+        </div>
+      </div>
+    </aside>
+    <div class="scrim hidden" id="scrim"></div>
+    <div class="main">
+      <div class="topbar">
+        <button class="btn icon ghost menu-btn" id="menuBtn" aria-label="Menu"></button>
+        <h1 id="pageTitle" class="grow">Dashboard</h1>
+        <span class="pill offline" id="liveBadge">Connecting</span>
+        <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme"></button>
+      </div>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

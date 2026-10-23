@@ -1,0 +1,25 @@
+{
+  "name": "uu-bus-erp",
+  "version": "1.0.0",
+  "description": "Secure, proxy-proof QR boarding system for college buses (rotating QR + device binding + live admin dashboard)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "seed:demo": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
+    "reset-admin": "node --disable-warning=ExperimentalWarning scripts/reset-admin.js",
+    "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js",
+    "test:security": "node --disable-warning=ExperimentalWarning scripts/security-test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "qrcode": "^1.5.4",
+    "zod": "^3.25.76"
+  }
+}

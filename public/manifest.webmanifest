@@ -1,0 +1,9 @@
+{
+  "name": "UU Bus ERP",
+  "short_name": "Bus ERP",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1e",
+  "theme_color": "#4f46e5",
+  "icons": [{ "src": "/icons/logo.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

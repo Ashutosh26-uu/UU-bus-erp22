@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bus screen · UU Bus ERP</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="incharge" id="app">
+    <header class="row between wrap hide-kiosk">
+      <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">BUS INCHARGE</span></div></div>
+      <div class="row wrap">
+        <span class="pill offline" id="liveBadge">Connecting</span>
+        <span class="small muted" id="userName"></span>
+        <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme"></button>
+        <button class="btn sm ghost" id="pwBtn">Password</button>
+        <button class="btn sm ghost" id="logoutBtn"></button>
+      </div>
+    </header>
+    <section id="view"></section>
+  </main>
+  <script type="module" src="/js/incharge.js"></script>
+</body>
+</html>
