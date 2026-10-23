@@ -259,6 +259,10 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
   background: var(--surface-2); border: 1px solid transparent;
 }
 .feed-item.new { animation: slideIn .45s cubic-bezier(.22, 1, .36, 1); border-color: var(--accent); background: var(--accent-soft); }
+a.card, a.portal-card { color: inherit; }
+a.portal-card { transition: border-color .15s, transform .12s, box-shadow .15s; }
+a.portal-card:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+a.portal-card:focus-visible { outline: none; box-shadow: var(--ring); }
 button.feed-item { width: 100%; text-align: left; border: 1px solid transparent; cursor: pointer; font: inherit; color: inherit; transition: border-color .15s, background .15s; }
 button.feed-item:hover { border-color: var(--accent); background: var(--accent-soft); }
 button.feed-item:focus-visible { outline: none; box-shadow: var(--ring); }

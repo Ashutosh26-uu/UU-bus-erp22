@@ -1,11 +1,12 @@
 # UU Bus ERP
 
-A secure, proxy-proof **QR boarding system** for college buses.
+A secure, proxy-proof **QR boarding system** for a fleet of **19 college buses**.
 
-The bus incharge opens the bus screen; it shows a QR code that changes every 20 seconds.
-Each student scans it with their **own phone**, types their name and student ID, sees their
-record (course, year, specialization, stop) and taps **Done**. The incharge's screen and the
-admin dashboard update **instantly** with the student's name and the running count.
+Every bus has **its own portal** (`/bus/1` … `/bus/19`), **its own rotating QR code** and
+**its own incharge login**. The incharge opens the bus portal; it shows a QR that changes every
+20 seconds. Each student scans it with their **own phone**, types their name and student ID,
+sees their record (course, year, specialization, stop) and taps **Done**. The bus portal and
+the admin dashboard update **instantly** with the student's name and the running count.
 
 This is deliberately **not** an attendance register: it only records who boarded which trip.
 
@@ -17,7 +18,8 @@ Requirements: **Node.js 22.13 or newer** (uses the built-in SQLite, no native mo
 
 ```bash
 npm install
-npm run seed:demo     # optional: 3 buses, 2 incharges, 45 students
+npm run seed:buses    # the 19 buses, their stops and 19 incharge accounts (real setup)
+npm run seed:demo     # same, plus ~6 demo students per bus (for trying it out)
 npm start
 ```
 
@@ -26,12 +28,13 @@ Then open <http://localhost:3000>.
 * First run creates the **admin** account and prints its one-time password in the console
   (also saved to `data/initial-admin.txt`; delete that file after signing in). You are forced
   to set a new password at first sign-in.
+* The seed creates **19 incharge accounts** `incharge1` … `incharge19`, one per bus, with
+  temporary passwords printed to the console and saved to `data/incharge-accounts.txt`.
+  Hand each incharge their line; they must change the password at first sign-in and then land
+  on their own bus portal. Delete the file once distributed.
 * The console also prints the **Network** address, e.g. `http://192.168.1.10:3000`. That is
-  what the QR code encodes, so student phones must be able to reach it (same Wi-Fi).
+  what the QR codes encode, so student phones must be able to reach it (same Wi-Fi).
   Change it any time from **Admin → Settings**, or set `BASE_URL` in `.env`.
-
-Demo accounts after `npm run seed:demo`: `incharge12 / Incharge12pass` (Bus 12) and
-`incharge7 / Incharge7pass` (Bus 7). Sample student: `Aditi Sharma`, ID `UU2023CS0100`.
 
 Useful scripts:
 
@@ -39,10 +42,30 @@ Useful scripts:
 | --- | --- |
 | `npm start` | run the server |
 | `npm run dev` | run with auto-restart on file changes |
-| `npm run seed:demo` | load demo buses / incharges / students |
+| `npm run seed:buses` | create the 19-bus fleet: buses, stops, one incharge account per bus |
+| `npm run seed:demo` | the fleet plus demo students (about 6 per bus) |
 | `npm run reset-admin` | reset the admin password if it is lost |
 | `npm run backup` | consistent copy of the database into `data/backups/` |
-| `npm run test:security` | end-to-end test of every security rule against a running server |
+| `npm run test:security` | end-to-end test of every security and portal rule against a running server |
+
+---
+
+## The 19 bus portals
+
+| What | Where | Who can open it |
+| --- | --- | --- |
+| Bus N portal (QR screen, live count, manual check-in, end trip) | `/bus/N` | the incharge assigned to bus N, or an admin |
+| Portal picker (all 19 buses with live status) | `/incharge` | admins and incharges with no assigned bus |
+| Bus N student link (what the QR encodes) | `/checkin/N?t=<rotating token>` | any phone that scanned bus N's live QR |
+| Admin console | `/admin` | admins |
+
+* An incharge signs in and is taken straight to their own portal. Opening another bus's
+  portal bounces them back to theirs; the API refuses it too (`WRONG_BUS_PORTAL`).
+* Each portal's QR is unique to that bus: the token is tied to the bus's running trip, the
+  link carries the bus number, and a bus 12 token presented on the bus 7 link is rejected.
+* The fleet is defined in `scripts/fleet.js` (numbers, names, routes, stops). Everything can be
+  renamed or reassigned later from **Admin → Buses & stops** and **Admin → Staff**; the
+  portal URL follows the bus number.
 
 ---
 
@@ -59,9 +82,10 @@ Useful scripts:
                                                                              └───────────────────┘
 ```
 
-1. **Incharge** signs in, picks bus + direction (to / from college), presses *Start trip*.
-2. The screen shows a QR with a countdown ring. The QR encodes a URL with a token that is an
-   HMAC of the trip's secret and the current 20-second time slot.
+1. **Incharge** signs in, lands on their bus portal, picks the direction (to / from college)
+   and presses *Start trip*.
+2. The portal shows the bus's QR with a countdown ring. The QR encodes `/checkin/<bus>` with a
+   token that is an HMAC of the trip's secret and the current 20-second time slot.
 3. **Student** scans with the normal camera app. The server validates the token, opens a
    5-minute check-in session bound to that phone, and asks for name + student ID.
 4. Both must match the database record. Everything shown (course, year, specialization, stop,
@@ -142,7 +166,7 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 ```
 
 * `uuid` can also be called `id`, `enrollment`, `roll no`, `reg no` …
-* `bus` is the bus number; unknown buses and stops are created automatically.
+* `bus` is the bus number (1–19); unknown buses and stops are created automatically.
 * Existing IDs are updated, not duplicated. Export from the same page gives you the full list.
 
 ---
@@ -150,9 +174,10 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 ## Roles
 
 * **Admin** – dashboard, students, buses & stops, staff accounts, trips, flags, audit log,
-  settings, device resets. Can also run any bus screen.
-* **Bus incharge** – starts / ends trips for their assigned bus (or any bus if none is
-  assigned), sees the live list, can mark a student manually with a reason.
+  settings, device resets. Can open any of the 19 bus portals.
+* **Bus incharge** – one account per bus; signs in straight into their own bus portal, starts
+  and ends that bus's trips, sees the live list, can mark a student manually with a reason.
+  Cannot open another bus's portal.
 * **Student** – no account, no app, no login. Scan, confirm, done.
 
 ---
@@ -170,7 +195,7 @@ src/
   routes/            /api/auth, /api/admin, /api/incharge, /api/checkin
 views/               login, admin, incharge, checkin, 404 pages
 public/              css, js (vanilla ES modules, no build step), icons
-scripts/             seed-demo, reset-admin, backup, security-test
+scripts/             fleet (the 19 buses), seed-buses, seed-demo, reset-admin, backup, security-test
 data/                database, secret key, backups (git-ignored)
 ```
 

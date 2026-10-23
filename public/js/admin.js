@@ -139,7 +139,7 @@ async function renderDashboard() {
               <div class="row"><div class="avatar">${esc(t.bus_number)}</div><div><div class="bold">Bus ${esc(t.bus_number)} · ${directionIcon(t.direction)} ${directionLabel(t.direction)}</div><div class="xs muted">${esc(t.incharge_name)} · started ${fmtTime(t.started_at)}</div></div></div>
               <span class="pill success" data-flagged></span>
             </div>
-            <div class="row between mt"><span class="bold"><span data-boarded>0</span> / <span data-expected>0</span> boarded</span><span class="row"><button class="btn sm" data-open-trip="${t.id}">Details</button><button class="btn sm danger" data-end-trip="${t.id}">End</button></span></div>
+            <div class="row between mt"><span class="bold"><span data-boarded>0</span> / <span data-expected>0</span> boarded</span><span class="row"><a class="btn sm ghost" href="/bus/${encodeURIComponent(t.bus_number)}" target="_blank" rel="noopener">Portal ↗</a><button class="btn sm" data-open-trip="${t.id}">Details</button><button class="btn sm danger" data-end-trip="${t.id}">End</button></span></div>
             <div class="progress mt"><i></i></div>
           </div>`).join('') : '<div class="card"><div class="empty"><div class="big">🚌</div>No trip is running. Incharges start trips from the bus screen.</div></div>'}
         </div>
@@ -312,14 +312,14 @@ function importDialog() {
 async function renderBuses() {
   const buses = await busesList(true);
   content.innerHTML = `
-    <div class="row between wrap"><p class="muted small">Each bus has its own stops and incharge. Students are assigned to one bus and stop.</p><button class="btn primary" id="addBus">${ICONS.plus}<span>Add bus</span></button></div>
+    <div class="row between wrap"><p class="muted small">Each bus has its own stops, its own portal (<code>/bus/&lt;number&gt;</code>) with its own QR, and its own incharge login. Students are assigned to one bus and stop.</p><div class="row"><span class="pill accent">${buses.filter((b) => b.active).length} buses</span><a class="btn" href="/incharge" target="_blank" rel="noopener">All portals ↗</a><button class="btn primary" id="addBus">${ICONS.plus}<span>Add bus</span></button></div></div>
     <div class="grid auto">${buses.length ? buses.map((b) => `
       <div class="card stack" data-bus="${b.id}">
         <div class="row between">
           <div class="row"><div class="avatar">${esc(b.number)}</div><div><div class="bold">${esc(b.name)}</div><div class="xs muted">${esc(b.route || 'No route description')}</div></div></div>
-          <div class="row">${b.live ? '<span class="pill live">Live</span>' : ''}${b.active ? '' : '<span class="pill">Inactive</span>'}<button class="btn icon sm ghost" data-edit-bus="${b.id}">${ICONS.edit}</button><button class="btn icon sm ghost" data-del-bus="${b.id}">${ICONS.trash}</button></div>
+          <div class="row">${b.live ? '<span class="pill live">Live</span>' : ''}${b.active ? '' : '<span class="pill">Inactive</span>'}<a class="btn sm" href="/bus/${encodeURIComponent(b.number)}" target="_blank" rel="noopener" title="Open this bus's portal">Portal ↗</a><button class="btn icon sm ghost" data-edit-bus="${b.id}">${ICONS.edit}</button><button class="btn icon sm ghost" data-del-bus="${b.id}">${ICONS.trash}</button></div>
         </div>
-        <div class="row wrap small muted"><span>👥 ${b.students} students</span><span>🧑‍✈️ ${b.incharges.length ? b.incharges.map((u) => esc(u.name)).join(', ') : 'no incharge'}</span></div>
+        <div class="row wrap small muted"><span>👥 ${b.students} students</span><span>🧑‍✈️ ${b.incharges.length ? b.incharges.map((u) => `${esc(u.name)} <span class="xs mono faint">(${esc(u.username)})</span>`).join(', ') : 'no incharge'}</span></div>
         <div>
           <div class="label mb">Stops (in order)</div>
           <div class="row wrap" data-stops>${b.stops.map((s) => `<span class="pill outline">${esc(s.name)} <button class="btn icon sm ghost" data-del-stop="${s.id}" title="Remove stop" aria-label="Remove">${ICONS.x}</button></span>`).join('') || '<span class="xs faint">No stops yet</span>'}</div>
@@ -375,7 +375,7 @@ async function renderStaff() {
     <tr>
       <td><div class="bold">${esc(u.name)}</div><div class="xs muted mono">${esc(u.username)}</div></td>
       <td><span class="pill ${u.role === 'admin' ? 'accent' : ''}">${u.role}</span></td>
-      <td>${u.bus_number ? `Bus ${esc(u.bus_number)}` : u.role === 'incharge' ? '<span class="faint">any bus</span>' : '—'}</td>
+      <td>${u.bus_number ? `<a href="/bus/${encodeURIComponent(u.bus_number)}" target="_blank" rel="noopener" title="Open portal">Bus ${esc(u.bus_number)} ↗</a>` : u.role === 'incharge' ? '<span class="faint">any bus</span>' : '—'}</td>
       <td>${u.active ? '<span class="pill success">Active</span>' : '<span class="pill">Inactive</span>'}${u.locked_until && u.locked_until > Date.now() ? ' <span class="pill danger">Locked</span>' : ''}${u.must_change_password ? ' <span class="pill warn" title="Temporary password">Temp pw</span>' : ''}</td>
       <td class="xs muted">${u.last_seen ? fmtRel(u.last_seen) : 'never'}</td>
       <td class="actions">

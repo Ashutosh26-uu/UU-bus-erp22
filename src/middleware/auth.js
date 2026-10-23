@@ -13,8 +13,20 @@ export const publicUser = (u) => ({
   name: u.name,
   role: u.role,
   bus_id: u.bus_id,
+  bus_number: u.bus_number ?? null,
   mustChangePassword: !!u.must_change_password,
+  home: homeFor(u),
 });
+
+/** Where this user lands after sign-in: admin console, their own bus portal, or the portal picker. */
+export function homeFor(u) {
+  if (u.role === 'admin') return '/admin';
+  if (u.bus_number) return `/bus/${encodeURIComponent(u.bus_number)}`;
+  return '/incharge';
+}
+
+/** Can this user operate this bus's portal? Admins and unassigned incharges can use any bus. */
+export const canAccessBus = (user, busId) => user.role === 'admin' || user.bus_id == null || user.bus_id === busId;
 
 /** Attach req.user / req.session when a valid session cookie is present. Never throws. */
 export function loadSession(req, res, next) {
@@ -26,8 +38,8 @@ export function loadSession(req, res, next) {
   const h = sha256(sid);
   const row = get(
     `SELECT s.csrf, s.expires_at, s.last_seen, s.created_at AS session_created,
-            u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password
-       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
+            u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password, b.number AS bus_number
+       FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN buses b ON b.id = u.bus_id WHERE s.id = ?`,
     h,
   );
   const t = now();

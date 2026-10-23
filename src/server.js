@@ -2,7 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import path from 'node:path';
 import { config, lanIp } from './config.js';
-import { migrate, bootstrapAdmin, cleanup, closeDb } from './db.js';
+import { migrate, bootstrapAdmin, cleanup, closeDb, get } from './db.js';
 import { HttpError } from './http.js';
 import { loadSession, requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -84,12 +84,24 @@ const requirePage = (...roles) => (req, res, next) => {
 
 app.get('/', (req, res) => {
   if (!req.user) return res.redirect('/login');
-  res.redirect(req.user.role === 'admin' ? '/admin' : '/incharge');
+  res.redirect(req.user.home);
 });
 app.get('/login', (req, res, next) => (req.user ? res.redirect('/') : next()), page('login.html'));
 app.get('/admin', requirePage('admin'), page('admin.html'));
-app.get('/incharge', requirePage('incharge', 'admin'), page('incharge.html'));
+// Portal picker (admins, unassigned incharges). An incharge with a bus goes straight to their own portal.
+app.get('/incharge', requirePage('incharge', 'admin'), (req, res, next) => {
+  if (req.user.role === 'incharge' && req.user.bus_number) return res.redirect(req.user.home);
+  next();
+}, page('incharge.html'));
+// One portal per bus: /bus/12 is Bus 12's screen. Only its incharge (or an admin) may open it.
+app.get('/bus/:number', requirePage('incharge', 'admin'), (req, res, next) => {
+  const bus = get('SELECT id, number FROM buses WHERE number = ? AND active = 1', String(req.params.number).slice(0, 20));
+  if (!bus) { res.status(404); return page('404.html')(req, res); }
+  if (req.user.role !== 'admin' && req.user.bus_id != null && req.user.bus_id !== bus.id) return res.redirect(req.user.home);
+  next();
+}, page('incharge.html'));
 app.get('/checkin', page('checkin.html'));
+app.get('/checkin/:bus', page('checkin.html'));
 app.use((req, res) => { res.status(404); page('404.html')(req, res); });
 
 // ------------------------------------------------------------------ errors

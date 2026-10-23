@@ -1,12 +1,19 @@
 import {
   $, $$, api, esc, toast, modal, confirmDialog, formHandler, theme, liveEvents, fmtTime, initials,
-  directionLabel, directionIcon, flagPills, requireStaff, logout, passwordChangeForm, debounce, ICONS,
+  directionLabel, directionIcon, flagPills, requireStaff, logout, passwordChangeForm, copyText, debounce, ICONS,
 } from './common.js';
 
+/*
+ * One portal per bus: /bus/<number> runs that bus only (its incharge or an admin).
+ * /incharge with no bus is the portal picker for admins and unassigned incharges.
+ */
 const view = $('#view');
+const scopedNumber = (() => { const m = location.pathname.match(/^\/bus\/([^/]+)/); return m ? decodeURIComponent(m[1]) : null; })();
+
 let user = null;
 let state = { buses: [], activeTrips: [], rotateSec: 20, baseUrl: '' };
-let trip = null;
+let bus = null;       // the scoped bus (portal mode)
+let trip = null;      // the trip currently on screen
 let summary = null;
 let qrTimer = null;
 let raf = null;
@@ -14,6 +21,7 @@ let nextRotateAt = 0;
 let wakeLock = null;
 let soundOn = true;
 let audioCtx = null;
+let gridRefresh = null;
 
 init();
 
@@ -38,32 +46,87 @@ async function init() {
 
 async function loadState() {
   try {
-    const s = await api.get('/api/incharge/state');
+    const s = await api.get(`/api/incharge/state${scopedNumber ? `?bus=${encodeURIComponent(scopedNumber)}` : ''}`);
     state = { buses: s.buses, activeTrips: s.activeTrips, rotateSec: s.qr.rotateSec, baseUrl: s.qr.baseUrl };
-    const mine = s.activeTrips.find((t) => t.incharge_id === user.id) || (s.activeTrips.length === 1 && user.role !== 'admin' ? s.activeTrips[0] : null);
-    if (mine) return openTrip(mine.id);
+    bus = s.scopedBus;
+    paintHeader();
+    if (!bus) {
+      if (user.role === 'incharge' && user.bus_number) { location.replace(user.home); return; }
+      return renderGrid();
+    }
+    const running = s.activeTrips.find((t) => t.bus_id === bus.id);
+    if (running) return openTrip(running.id);
     renderStart();
   } catch (e) {
+    if (e.code === 'WRONG_BUS_PORTAL') {
+      view.innerHTML = `<div class="card pad-lg center"><div class="status-icon warn">🔒</div><h2>Not your bus portal</h2><p class="muted mt">${esc(e.message)}</p><a class="btn primary mt" href="${esc(user.home)}">Open my portal</a></div>`;
+      return;
+    }
+    if (e.status === 404) {
+      view.innerHTML = `<div class="card pad-lg center"><div class="status-icon warn">🚌</div><h2>Bus not found</h2><p class="muted mt">${esc(e.message)}</p><a class="btn mt" href="/incharge">All bus portals</a></div>`;
+      return;
+    }
     view.innerHTML = `<div class="card"><div class="empty"><div class="big">⚠️</div>${esc(e.message)}<div class="mt"><button class="btn" id="retry">Retry</button></div></div></div>`;
     $('#retry').addEventListener('click', loadState);
   }
 }
 
-// ------------------------------------------------------------------ start screen
+function paintHeader() {
+  const badge = $('#busBadge');
+  const all = $('#allBuses');
+  if (bus) {
+    badge.textContent = `Bus ${bus.number} · ${bus.name}`;
+    badge.classList.remove('hidden');
+    document.title = `Bus ${bus.number} portal · UU Bus ERP`;
+  } else badge.classList.add('hidden');
+  all.classList.toggle('hidden', !(bus && (user.role === 'admin' || user.bus_id == null)));
+}
+
+// ------------------------------------------------------------------ portal picker (admin / unassigned)
+async function renderGrid() {
+  stopQr();
+  trip = null; summary = null;
+  setKiosk(false);
+  const r = await api.get('/api/incharge/buses');
+  const live = r.buses.filter((b) => b.trip).length;
+  view.innerHTML = `
+    <div class="row between wrap">
+      <div><h2>Bus portals</h2><p class="muted small">Every bus has its own portal, its own QR and its own incharge login. Open a portal to run that bus.</p></div>
+      <div class="row"><span class="pill accent">${r.buses.length} buses</span><span class="pill ${live ? 'live' : ''}">${live} live</span></div>
+    </div>
+    <div class="grid auto">${r.buses.length ? r.buses.map((b) => `
+      <a class="card stack portal-card" href="/bus/${encodeURIComponent(b.number)}">
+        <div class="row between">
+          <div class="row grow"><div class="avatar">${esc(b.number)}</div><div class="grow"><div class="bold truncate">${esc(b.name)}</div><div class="xs muted truncate" title="${esc(b.route || '')}">${esc(b.route || '')}</div></div></div>
+          ${b.trip ? '<span class="pill live">Live</span>' : '<span class="pill">Idle</span>'}
+        </div>
+        <div class="row wrap xs muted">
+          <span>🧑‍✈️ ${esc(b.incharge_name || 'no incharge')}</span>
+          <span>👥 ${b.students}</span>
+          ${b.trip ? `<span class="bold">${b.trip.boarded}/${b.students} boarded · ${directionIcon(b.trip.direction)} ${directionLabel(b.trip.direction)}</span>` : ''}
+        </div>
+        <div class="xs mono faint">/bus/${esc(b.number)}</div>
+      </a>`).join('') : '<div class="card"><div class="empty"><div class="big">🚌</div>No buses yet. Run <code>npm run seed:buses</code> or add buses in the admin console.</div></div>'}
+    </div>`;
+}
+
+// ------------------------------------------------------------------ start screen (portal mode)
 function renderStart() {
   stopQr();
   trip = null; summary = null;
   setKiosk(false);
   const hour = new Date().getHours();
   const defaultDir = hour < 13 ? 'to_college' : 'from_college';
-  const busOpts = state.buses.map((b) => `<option value="${b.id}">Bus ${esc(b.number)} · ${esc(b.name)}${b.route ? ` — ${esc(b.route)}` : ''}</option>`).join('');
+  const portalUrl = `${location.origin}/bus/${encodeURIComponent(bus.number)}`;
   view.innerHTML = `
     <div class="grid cols-2">
       <div class="card pad-lg stack">
-        <div><h2>Start a trip</h2><p class="muted small">The QR screen appears the moment you start. Students scan it with their phone camera.</p></div>
-        ${state.buses.length ? `
+        <div class="row between">
+          <div><h2>Bus ${esc(bus.number)} portal</h2><p class="muted small">${esc(bus.name)}${bus.route ? ` · ${esc(bus.route)}` : ''}</p></div>
+          <div class="avatar lg">${esc(bus.number)}</div>
+        </div>
         <form id="startForm" class="stack">
-          <div class="field"><label>Bus</label><select class="input lg" name="bus_id" required>${busOpts}</select></div>
+          <input type="hidden" name="bus_id" value="${bus.id}">
           <div class="field"><label>Direction</label>
             <div class="choice">
               <label><input type="radio" name="direction" value="to_college" ${defaultDir === 'to_college' ? 'checked' : ''}><span class="big">🏫</span><span class="bold">To college</span><span class="xs muted">Morning pickup</span></label>
@@ -71,22 +134,19 @@ function renderStart() {
             </div>
           </div>
           <div class="error-text" data-error hidden></div>
-          <button class="btn primary lg block" type="submit">Start trip &amp; show QR</button>
-        </form>` : '<div class="empty">No bus is assigned to you yet. Ask the admin.</div>'}
+          <button class="btn primary lg block" type="submit">Start trip &amp; show Bus ${esc(bus.number)} QR</button>
+        </form>
       </div>
       <div class="stack">
-        ${state.activeTrips.length ? `
         <div class="card">
-          <div class="card-title"><h3>Running trips</h3><span class="pill live">Live</span></div>
-          <div class="stack">${state.activeTrips.map((t) => `
-            <button class="feed-item as-btn" data-open="${t.id}">
-              <div class="avatar">${esc(t.bus_number)}</div>
-              <div class="meta"><span class="name">Bus ${esc(t.bus_number)} · ${directionLabel(t.direction)}</span>
-              <span class="sub">${esc(t.incharge_name)} · started ${fmtTime(t.started_at)} · ${t.counts.boarded}/${t.counts.expected} boarded</span></div>
-              <span class="time">Open →</span>
-            </button>`).join('')}
+          <div class="card-title"><h3>This portal</h3><span class="pill accent">Bus ${esc(bus.number)}</span></div>
+          <div class="feed">
+            <div class="feed-item"><div class="meta"><span class="name">Portal link</span><span class="sub mono">${esc(portalUrl)}</span></div><button class="btn sm ghost" id="copyPortal" title="Copy link">${ICONS.copy}</button></div>
+            <div class="feed-item"><div class="meta"><span class="name">Incharge</span><span class="sub">${esc(bus.incharges?.length ? bus.incharges.join(', ') : 'not assigned yet')}</span></div></div>
+            <div class="feed-item"><div class="meta"><span class="name">Students assigned</span><span class="sub">${bus.students}</span></div></div>
+            <div class="feed-item"><div class="meta"><span class="name">Stops</span><span class="sub">${esc(bus.stops?.length ? bus.stops.join(' → ') : 'none yet')}</span></div></div>
           </div>
-        </div>` : ''}
+        </div>
         <div class="card soft">
           <h3>How it works</h3>
           <ol class="small muted mt">
@@ -95,27 +155,25 @@ function renderStart() {
             <li>You see the count and names update live. Flags show anything unusual.</li>
             <li>End the trip when everyone has boarded.</li>
           </ol>
-          <p class="xs faint mt">The QR changes every ${state.rotateSec}s and only works from the live screen. Screenshots and forwarded links expire immediately, and each phone can board only one student.</p>
+          <p class="xs faint mt">This QR is unique to Bus ${esc(bus.number)}, changes every ${state.rotateSec}s and only works from the live screen. Screenshots and forwarded links expire immediately, and each phone can board only one student.</p>
         </div>
       </div>
     </div>`;
-  $$('[data-open]').forEach((b) => b.addEventListener('click', () => openTrip(Number(b.dataset.open))));
+  $('#copyPortal').addEventListener('click', () => copyText(portalUrl));
   const form = $('#startForm');
-  if (form) {
-    formHandler(form, $('button[type=submit]', form), async (v) => {
-      unlockAudio();
-      const r = await api.post('/api/incharge/trips', { bus_id: Number(v.bus_id), direction: v.direction });
-      toast(`Trip started for bus ${r.trip.bus_number}`, 'success');
-      await openTrip(r.trip.id);
-    });
-  }
+  formHandler(form, $('button[type=submit]', form), async (v) => {
+    unlockAudio();
+    const r = await api.post('/api/incharge/trips', { bus_id: Number(v.bus_id), direction: v.direction });
+    toast(`Trip started for Bus ${r.trip.bus_number}`, 'success');
+    await openTrip(r.trip.id);
+  });
 }
 
 // ------------------------------------------------------------------ live screen
 async function openTrip(id) {
   try {
     summary = await api.get(`/api/incharge/trips/${id}`);
-  } catch (e) { toast(e.message, 'error'); return renderStart(); }
+  } catch (e) { toast(e.message, 'error'); return bus ? renderStart() : renderGrid(); }
   trip = summary.trip;
   if (trip.status !== 'active') { toast('That trip has already ended', 'warn'); return loadState(); }
   renderLive();
@@ -142,7 +200,7 @@ function renderLive() {
           <div class="qr-paper" id="qrPaper"><div class="spinner lg"></div></div>
           <div class="qr-overlay hidden" id="qrOverlay">Reconnecting…</div>
         </div>
-        <div><div class="bold">Scan with your phone camera to board</div><div class="qr-caption">New code every ${state.rotateSec}s · ${esc(state.baseUrl.replace(/^https?:\/\//, ''))}</div></div>
+        <div><div class="bold">Bus ${esc(t.bus_number)} · scan with your phone camera to board</div><div class="qr-caption">New code every ${state.rotateSec}s · ${esc(state.baseUrl.replace(/^https?:\/\//, ''))}/checkin/${esc(t.bus_number)}</div></div>
         <div class="row">
           <button class="btn sm" id="kioskBtn">${ICONS.expand}<span>Full screen</span></button>
           <button class="btn sm ghost" id="soundBtn" title="Sound on new boarding">${soundOn ? '🔔' : '🔕'}</button>
@@ -223,7 +281,7 @@ async function refreshQr() {
   const overlay = $('#qrOverlay');
   try {
     const q = await api.get(`/api/incharge/trips/${trip.id}/qr`);
-    if (!trip) return;
+    if (!trip || !paper) return;
     paper.innerHTML = q.svg;
     paper.classList.remove('stale');
     overlay.classList.add('hidden');
@@ -267,7 +325,12 @@ function stopQr() {
 
 // ------------------------------------------------------------------ events
 function onCheckinEvent(d) {
-  if (!trip || d.trip.id !== trip.id) return;
+  if (!trip) {
+    // portal picker: keep the live counts fresh (throttled)
+    if (!bus) { clearTimeout(gridRefresh); gridRefresh = setTimeout(renderGrid, 400); }
+    return;
+  }
+  if (d.trip.id !== trip.id) return;
   if (summary.checkins.some((c) => c.id === d.checkin.id)) return;
   summary.checkins.unshift(d.checkin);
   summary.counts = d.counts;
@@ -286,13 +349,16 @@ function onCheckinEvent(d) {
 
 function onTripEvent(d) {
   if (trip && d.trip.id === trip.id && d.type === 'ended') return onTripEnded(d.trip);
-  if (!trip) loadState();
+  if (trip) return;
+  if (bus) { if (d.trip.bus_id === bus.id) loadState(); return; }
+  clearTimeout(gridRefresh);
+  gridRefresh = setTimeout(renderGrid, 300);
 }
 
 function onTripEnded(t) {
   if (!trip) return;
   const boarded = t?.counts?.boarded ?? summary?.counts?.boarded ?? 0;
-  toast(`Trip for bus ${trip.bus_number} ended · ${boarded} boarded`, 'success', 5000);
+  toast(`Trip for Bus ${trip.bus_number} ended · ${boarded} boarded`, 'success', 5000);
   stopQr();
   trip = null;
   loadState();
@@ -300,7 +366,7 @@ function onTripEnded(t) {
 
 async function endTrip() {
   const c = summary.counts;
-  const ok = await confirmDialog(`End the trip for bus ${trip.bus_number}? ${c.boarded} of ${c.expected} students have boarded. The QR stops working immediately.`, { title: 'End trip', okText: 'End trip', danger: true });
+  const ok = await confirmDialog(`End the trip for Bus ${trip.bus_number}? ${c.boarded} of ${c.expected} students have boarded. The QR stops working immediately.`, { title: 'End trip', okText: 'End trip', danger: true });
   if (!ok) return;
   try {
     const id = trip.id;
@@ -315,7 +381,7 @@ async function endTrip() {
 // ------------------------------------------------------------------ manual check-in
 function openManual() {
   const m = modal({
-    title: 'Manual check-in',
+    title: `Manual check-in · Bus ${trip.bus_number}`,
     body: `
       <p class="muted small">Use only when a student cannot scan (dead phone, no data). It is recorded as <b>manual</b> with your name.</p>
       <div class="field"><label>Search student</label><div class="input-wrap"><input class="input" id="mSearch" placeholder="Name or student ID" autocomplete="off"></div></div>
@@ -337,12 +403,12 @@ function openManual() {
     try {
       const r = await api.get(`/api/incharge/students/search?q=${encodeURIComponent(q)}`);
       results.innerHTML = r.items.length ? r.items.map((s) => `
-        <button class="feed-item as-btn" data-uuid="${esc(s.uuid)}" data-name="${esc(s.name)}" data-stop="${esc(s.stop || '')}">
+        <button class="feed-item as-btn" data-uuid="${esc(s.uuid)}" data-name="${esc(s.name)}">
           <div class="avatar">${esc(initials(s.name))}</div>
           <div class="meta"><span class="name">${esc(s.name)}</span><span class="sub mono">${esc(s.uuid)} · ${s.bus_number ? `Bus ${esc(s.bus_number)}` : 'no bus'}${s.stop ? ` · ${esc(s.stop)}` : ''}</span></div>
         </button>`).join('') : '<div class="empty small">No student found</div>';
       $$('[data-uuid]', results).forEach((b) => b.addEventListener('click', () => {
-        picked = { uuid: b.dataset.uuid, name: b.dataset.name, stop: b.dataset.stop };
+        picked = { uuid: b.dataset.uuid, name: b.dataset.name };
         $('#mPicked', m.root).innerHTML = `<div class="avatar">${esc(initials(picked.name))}</div><div class="meta"><span class="name">${esc(picked.name)}</span><span class="sub mono">${esc(picked.uuid)}</span></div>`;
         form.classList.remove('hidden');
         results.innerHTML = '';

@@ -13,8 +13,12 @@
 <body>
   <main class="incharge" id="app">
     <header class="row between wrap hide-kiosk">
-      <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">BUS INCHARGE</span></div></div>
       <div class="row wrap">
+        <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">BUS PORTAL</span></div></div>
+        <span class="pill accent hidden" id="busBadge"></span>
+      </div>
+      <div class="row wrap">
+        <a class="btn sm ghost hidden" id="allBuses" href="/incharge">All buses</a>
         <span class="pill offline" id="liveBadge">Connecting</span>
         <span class="small muted" id="userName"></span>
         <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme"></button>

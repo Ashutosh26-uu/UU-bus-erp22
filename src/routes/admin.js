@@ -228,10 +228,10 @@ router.get('/buses', (req, res) => {
   const buses = all(
     `SELECT b.*, (SELECT COUNT(*) FROM students s WHERE s.bus_id = b.id AND s.active = 1) AS students,
             (SELECT COUNT(*) FROM trips t WHERE t.bus_id = b.id AND t.status = 'active') AS live
-       FROM buses b ORDER BY b.active DESC, b.number`,
+       FROM buses b ORDER BY b.active DESC, CAST(b.number AS INTEGER), b.number`,
   );
   const stops = all('SELECT * FROM stops ORDER BY bus_id, seq, name');
-  const incharges = all("SELECT id, name, bus_id FROM users WHERE role = 'incharge' AND active = 1");
+  const incharges = all("SELECT id, name, username, bus_id FROM users WHERE role = 'incharge' AND active = 1 ORDER BY name");
   res.json({ buses: buses.map((b) => ({ ...b, stops: stops.filter((s) => s.bus_id === b.id), incharges: incharges.filter((u) => u.bus_id === b.id) })) });
 });
 
@@ -314,7 +314,7 @@ router.get('/users', (req, res) => {
     items: all(
       `SELECT u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password, u.locked_until, u.created_at, b.number AS bus_number,
               (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id = u.id) AS last_seen
-         FROM users u LEFT JOIN buses b ON b.id = u.bus_id ORDER BY u.role, u.name COLLATE NOCASE`,
+         FROM users u LEFT JOIN buses b ON b.id = u.bus_id ORDER BY u.role, CAST(b.number AS INTEGER), b.number, u.name COLLATE NOCASE`,
     ),
   });
 });

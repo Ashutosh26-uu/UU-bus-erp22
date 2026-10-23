@@ -10,8 +10,8 @@ formHandler(form, $('button[type=submit]', form), async (v) => {
   const r = await api.post('/api/auth/login', { username: v.username, password: v.password });
   api.csrf = r.csrf;
   const next = new URLSearchParams(location.search).get('next');
-  const safeNext = next && /^\/(admin|incharge)$/.test(next) ? next : null;
-  const home = r.user.role === 'admin' ? '/admin' : '/incharge';
+  const safeNext = next && /^\/(admin|incharge|bus\/[A-Za-z0-9%._-]+)$/.test(next) ? next : null;
   toast(`Welcome, ${r.user.name}`, 'success', 1200);
-  location.href = safeNext || home;
+  // incharges land on their own bus portal (/bus/<number>); admins on the console
+  location.href = safeNext || r.user.home || '/';
 });

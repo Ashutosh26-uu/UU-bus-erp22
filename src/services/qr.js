@@ -20,7 +20,9 @@ export function tokenFor(trip, ms = Date.now()) {
 }
 
 export const baseUrl = () => publicBaseUrl(getSetting('base_url'));
-export const checkinUrl = (token) => `${baseUrl()}/checkin?t=${encodeURIComponent(token)}`;
+/** Each bus gets its own link: /checkin/<bus number>?t=<token>. The token is still bound to the trip. */
+export const checkinUrl = (token, busNumber) =>
+  `${baseUrl()}/checkin${busNumber ? `/${encodeURIComponent(busNumber)}` : ''}?t=${encodeURIComponent(token)}`;
 
 export function secondsLeftInSlot(ms = Date.now()) {
   const s = config.qrRotateSec;

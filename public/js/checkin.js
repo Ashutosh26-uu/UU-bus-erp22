@@ -33,12 +33,14 @@ boot();
 async function boot() {
   const params = new URLSearchParams(location.search);
   const token = params.get('t');
-  if (token) history.replaceState({}, '', '/checkin');
+  // /checkin/<bus number> — each bus has its own link; the server double-checks the token belongs to that bus
+  const pathBus = (() => { const m = location.pathname.match(/^\/checkin\/([^/]+)/); return m ? decodeURIComponent(m[1]) : null; })();
+  if (token) history.replaceState({}, '', pathBus ? `/checkin/${encodeURIComponent(pathBus)}` : '/checkin');
   renderLoading(token ? 'Checking the QR code…' : 'Loading…');
   try {
     let s;
     if (token) {
-      s = await api.post('/api/checkin/session', { token });
+      s = await api.post('/api/checkin/session', pathBus ? { token, bus: pathBus } : { token });
     } else {
       s = await api.get('/api/checkin/session');
       rememberDevice(s.device);

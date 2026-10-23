@@ -43,7 +43,8 @@ router.post('/login', loginLimiter, (req, res) => {
   );
   setCookie(res, SESSION_COOKIE, sid, { maxAgeMs: config.sessionTtlMs, sameSite: 'Lax' });
   audit(req, 'login', 'user', user.id, '', { id: user.id, name: user.name });
-  res.json({ user: publicUser(user), csrf });
+  const bus_number = user.bus_id ? get('SELECT number FROM buses WHERE id = ?', user.bus_id)?.number ?? null : null;
+  res.json({ user: publicUser({ ...user, bus_number }), csrf });
 });
 
 router.get('/me', requireAuthPendingOk(), (req, res) => {

@@ -2,15 +2,15 @@
  * End-to-end security test. Run against a RUNNING server that has the demo data loaded:
  *   npm run seed:demo && npm start          (in one terminal)
  *   ADMIN_PW=<admin password> npm run test:security   (in another)
- * Optional: BASE=http://localhost:3000  INCHARGE_PW=Incharge12pass
- * Simulates different phones with separate cookie jars. Safe to re-run.
+ * Optional: BASE=http://localhost:3000
+ * Simulates different phones with separate cookie jars and creates/removes its own temporary
+ * incharge account. Uses bus 12 of the seeded fleet. Safe to re-run.
  */
 import { tokenFor } from '../src/services/qr.js';
 import { get } from '../src/db.js';
 
 const BASE = (process.env.BASE || 'http://localhost:3000').replace(/\/+$/, '');
 const ADMIN_PW = process.env.ADMIN_PW;
-const INCHARGE_PW = process.env.INCHARGE_PW || 'Incharge12pass';
 if (!ADMIN_PW) { console.error('Set ADMIN_PW=<admin password>'); process.exit(2); }
 
 let pass = 0;
@@ -40,8 +40,6 @@ async function call(j, method, path, body, extra = {}) {
   return { status: res.status, data };
 }
 
-const S = { aditi: ['UU2023CS0100', 'Aditi Sharma'], rahul: ['UU2023BB0101', 'Rahul Joshi'], priya: ['UU2023BC0102', 'Priya Kohli'], arjun: ['UU2023AG0103', 'Arjun Singh'], tanvi: ['UU2023AG0118', 'Tanvi Singh'] };
-
 // ---------------------------------------------------------------- sign in + reset state
 const admin = jar();
 let r = await call(admin, 'POST', '/api/auth/login', { username: 'admin', password: ADMIN_PW });
@@ -49,19 +47,34 @@ if (r.status !== 200) { console.error('admin login failed:', r.data); process.ex
 ok(true, 'admin login');
 const csrf = { 'X-CSRF-Token': r.data.csrf, Origin: BASE };
 
+const allBuses = (await call(admin, 'GET', '/api/admin/buses')).data.buses.filter((b) => b.active);
+const bus12 = allBuses.find((b) => b.number === '12');
+const otherBus = allBuses.find((b) => b.number !== '12');
+if (!bus12 || !otherBus) { console.error('Need the seeded fleet. Run: npm run seed:demo'); process.exit(2); }
 const state0 = await call(admin, 'GET', '/api/incharge/state');
 for (const t of state0.data.activeTrips.filter((t) => t.bus_number === '12')) await call(admin, 'POST', `/api/incharge/trips/${t.id}/end`, {}, csrf);
-const ids = {};
-for (const [k, [uuid]] of Object.entries(S)) {
-  const s = (await call(admin, 'GET', `/api/admin/students?q=${uuid}`)).data.items.find((x) => x.uuid === uuid);
-  if (!s) { console.error(`Demo student ${uuid} missing. Run: npm run seed:demo`); process.exit(2); }
-  ids[k] = s.id;
-  await call(admin, 'POST', `/api/admin/students/${s.id}/devices/reset`, {}, csrf);
-}
+
+// four students of bus 12 and one from another bus, as [uuid, name]; phones unlinked so the run is repeatable
+const pick = async (busId, n) => (await call(admin, 'GET', `/api/admin/students?bus=${busId}&active=1&limit=${n}`)).data.items.slice(0, n);
+const on12 = await pick(bus12.id, 4);
+const onOther = await pick(otherBus.id, 1);
+if (on12.length < 4 || onOther.length < 1) { console.error('Need at least 4 students on bus 12 and 1 on another bus. Run: npm run seed:demo'); process.exit(2); }
+const S = { aditi: [on12[0].uuid, on12[0].name], rahul: [on12[1].uuid, on12[1].name], priya: [on12[2].uuid, on12[2].name], arjun: [on12[3].uuid, on12[3].name], tanvi: [onOther[0].uuid, onOther[0].name] };
+const ids = { aditi: on12[0].id, rahul: on12[1].id, priya: on12[2].id, arjun: on12[3].id, tanvi: onOther[0].id };
+for (const id of Object.values(ids)) await call(admin, 'POST', `/api/admin/students/${id}/devices/reset`, {}, csrf);
 const users = (await call(admin, 'GET', '/api/admin/users')).data.items;
-const stale = users.find((u) => u.username === 'locktest');
-if (stale) await call(admin, 'DELETE', `/api/admin/users/${stale.id}`, undefined, csrf);
-const bus12 = (await call(admin, 'GET', '/api/admin/buses')).data.buses.find((b) => b.number === '12');
+for (const u of users.filter((x) => x.username === 'locktest' || x.username === 'testincharge12')) await call(admin, 'DELETE', `/api/admin/users/${u.id}`, undefined, csrf);
+
+console.log('\n[fleet]');
+ok(allBuses.length >= 19, `fleet has 19 buses (found ${allBuses.length})`);
+ok(allBuses.every((b) => b.stops.length > 0), 'every bus has stops');
+ok(allBuses.filter((b) => b.incharges.length > 0).length >= 19, 'every bus has its own incharge account');
+const h12 = await fetch(`${BASE}/bus/12`, { headers: admin.headers(), redirect: 'manual' });
+ok(h12.status === 200, 'admin can open /bus/12 portal page');
+const h404 = await fetch(`${BASE}/bus/does-not-exist`, { headers: admin.headers(), redirect: 'manual' });
+ok(h404.status === 404, 'unknown bus portal -> 404');
+const anon = await fetch(`${BASE}/bus/12`, { redirect: 'manual' });
+ok(anon.status === 302 && /\/login/.test(anon.headers.get('location') || ''), 'portal page without login redirects to /login');
 
 // ---------------------------------------------------------------- auth & csrf
 console.log('\n[auth & csrf]');
@@ -73,13 +86,27 @@ r = await call(admin, 'POST', '/api/admin/buses', { number: 'X', name: 'x' }, { 
 ok(r.status === 403 && r.data.code === 'ORIGIN', 'cross-origin POST -> 403', r.status);
 r = await call(admin, 'POST', '/api/auth/login', { username: 'admin', password: "x' OR 1=1 --" });
 ok(r.status === 401, 'injection-style password rejected');
+// a throw-away incharge for bus 12 (temporary password must be changed before the portal works)
+r = await call(admin, 'POST', '/api/admin/users', { username: 'testincharge12', name: 'Test Incharge 12', role: 'incharge', bus_id: bus12.id, password: 'TempIncharge123' }, csrf);
+const testInchargeId = r.data.id;
 const inch = jar();
-r = await call(inch, 'POST', '/api/auth/login', { username: 'incharge12', password: INCHARGE_PW });
-ok(r.status === 200 && r.data.user.role === 'incharge', 'incharge login');
-const icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
+r = await call(inch, 'POST', '/api/auth/login', { username: 'testincharge12', password: 'TempIncharge123' });
+ok(r.status === 200 && r.data.user.role === 'incharge' && r.data.user.home === '/bus/12', 'incharge login lands on its own portal /bus/12');
+let icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
+r = await call(inch, 'GET', '/api/incharge/state?bus=12');
+ok(r.status === 403 && r.data.code === 'PASSWORD_CHANGE_REQUIRED', 'temporary password blocks the portal until changed');
+r = await call(inch, 'POST', '/api/auth/change-password', { current: 'TempIncharge123', next: 'Incharge12fresh' }, icsrf);
+ok(r.status === 200, 'incharge changes temporary password');
+r = await call(inch, 'GET', '/api/incharge/state?bus=12');
+ok(r.status === 200 && r.data.scopedBus?.number === '12' && r.data.buses.length === 1, 'incharge sees only its own bus portal');
+r = await call(inch, 'GET', `/api/incharge/state?bus=${encodeURIComponent(otherBus.number)}`);
+ok(r.status === 403 && r.data.code === 'WRONG_BUS_PORTAL', 'incharge cannot open another bus portal -> 403', r.status);
+r = await call(inch, 'GET', '/api/incharge/buses');
+ok(r.status === 200 && r.data.buses.length === 1 && r.data.buses[0].number === '12', 'portal picker shows the incharge only its bus');
+const bounce = await fetch(`${BASE}/bus/${encodeURIComponent(otherBus.number)}`, { headers: inch.headers(), redirect: 'manual' });
+ok(bounce.status === 302 && bounce.headers.get('location') === '/bus/12', 'another bus portal page bounces the incharge to /bus/12');
 r = await call(inch, 'GET', '/api/admin/dashboard');
 ok(r.status === 403, 'incharge cannot open admin API -> 403', r.status);
-const otherBus = (await call(admin, 'GET', '/api/admin/buses')).data.buses.find((b) => b.number !== '12');
 r = await call(inch, 'POST', '/api/incharge/trips', { bus_id: otherBus.id, direction: 'to_college' }, icsrf);
 ok(r.status === 403, 'incharge cannot start a trip for another bus -> 403', r.status);
 
@@ -92,6 +119,12 @@ const freshToken = async () => (await call(admin, 'GET', `/api/incharge/trips/${
 let tok = await freshToken();
 r = await call(jar(), 'POST', '/api/checkin/session', { token: tok.slice(0, -2) + 'zz' });
 ok(r.status === 410 && r.data.code === 'QR_EXPIRED', 'tampered token -> 410', r.status);
+const qrInfo = (await call(admin, 'GET', `/api/incharge/trips/${trip.id}/qr`)).data;
+ok(/\/checkin\/12\?t=/.test(qrInfo.url), 'QR link carries the bus number (/checkin/12)', qrInfo.url);
+r = await call(jar(), 'POST', '/api/checkin/session', { token: await freshToken(), bus: otherBus.number });
+ok(r.status === 410, 'bus 12 token presented on another bus link -> 410', r.status);
+r = await call(jar(), 'POST', '/api/checkin/session', { token: await freshToken(), bus: '12' });
+ok(r.status === 200, 'bus 12 token on the bus 12 link -> ok', r.status);
 const rawTrip = get('SELECT * FROM trips WHERE id = ?', trip.id);
 r = await call(jar(), 'POST', '/api/checkin/session', { token: tokenFor(rawTrip, Date.now() - 120_000) });
 ok(r.status === 410, 'token from 2 minutes ago -> 410 (screenshots defeated)', r.status);
@@ -113,12 +146,12 @@ r = await scan(d1);
 ok(r.status === 200 && r.data.trip.bus_number === '12', 'live token -> session');
 r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: S.aditi[0], name: 'Someone Else' });
 ok(r.status === 404 && r.data.code === 'NO_MATCH', 'right ID + wrong name -> no match', r.status);
-r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: S.aditi[0], name: 'Aditi' });
+r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: S.aditi[0], name: S.aditi[1].split(' ')[0] });
 ok(r.status === 404, 'first name only -> no match');
 r = await call(d1, 'POST', '/api/checkin/confirm');
 ok(r.status === 400 && r.data.code === 'NO_STUDENT', 'confirm before lookup -> 400');
-r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: ' uu2023cs0100 ', name: '  aditi   SHARMA ' });
-ok(r.status === 200 && r.data.student.name === 'Aditi Sharma' && r.data.student.stop === 'Rajpur Road', 'messy case/spacing matches; details come from DB');
+r = await call(d1, 'POST', '/api/checkin/lookup', { uuid: ` ${S.aditi[0].toLowerCase()} `, name: `  ${S.aditi[1].toUpperCase().replace(' ', '   ')} ` });
+ok(r.status === 200 && r.data.student.uuid === S.aditi[0] && r.data.student.name === S.aditi[1] && r.data.student.stop, 'messy case/spacing matches; details come from DB');
 
 // ---------------------------------------------------------------- anti-proxy
 console.log('\n[anti-proxy]');
@@ -193,6 +226,7 @@ r = await call(admin, 'GET', '/api/admin/audit');
 ok(r.status === 200 && r.data.items.some((a) => a.action === 'checkin.manual') && r.data.items.some((a) => a.action === 'login.failed'), 'audit log records manual check-in and failed logins');
 r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/end`, {}, csrf);
 ok(r.status === 200, 'end trip 3');
+await call(admin, 'DELETE', `/api/admin/users/${testInchargeId}`, undefined, csrf);
 
 console.log('\n[headers]');
 const h = await fetch(`${BASE}/login`);
