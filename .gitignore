@@ -2,3 +2,7 @@ node_modules/
 data/
 .env
 *.log
+
+.vercel
+.env*
+!.env.example

@@ -179,12 +179,15 @@ Redeploy) so the function picks them up. Until both variables exist, every page 
 
 ```bash
 npx vercel link
-npx vercel env pull .env
-npm run seed:buses
+npx vercel env pull .env.vercel --environment production
+set -a; . ./.env.vercel; set +a; npm run seed:buses
 ```
 
-`vercel env pull` writes the Turso URL and token into `.env` (git-ignored); the seed then
-creates the 19 buses, their stops, `admin` and `incharge1` … `incharge19` directly in Turso.
+`vercel env pull` writes the Turso URL and token into `.env.vercel` (git-ignored). It is
+deliberately not `.env`: the app reads `.env` on every local start, so production settings
+there would make your laptop write to the live database. The third line loads them only for
+the seed (Git Bash / macOS / Linux syntax), which then creates the 19 buses, their stops,
+`admin` and `incharge1` … `incharge19` directly in Turso.
 The passwords are printed and saved to `data/turso-initial-admin.txt` and
 `data/turso-incharge-accounts.txt` (separate from your local files). Instead of seeding you can
 set `ADMIN_PASSWORD` on Vercel: the first request then creates `admin` with that password.
