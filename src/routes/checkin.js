@@ -30,8 +30,12 @@ async function loadCheckinSession(req, res) {
 /** Step 1: the phone scanned a live QR. Exchange the rotating token for a short private session. */
 router.post('/session', scanLimiter, async (req, res) => {
   const { token, bus } = validate(z.object({ token: z.string().min(5).max(120), bus: z.string().trim().max(20).optional() }), req.body);
-  const tripRaw = await verifyToken(token);
-  if (!tripRaw) throw new HttpError(410, 'This QR code has expired. Scan the live QR on the bus screen again.', { code: 'QR_EXPIRED' });
+  const checked = await verifyToken(token);
+  if (checked.error === 'NO_TRIP') {
+    throw new HttpError(409, `No trip is running on Bus ${checked.bus.number} right now. Ask the incharge to start the trip, then scan again.`, { code: 'NO_TRIP', bus: checked.bus.number });
+  }
+  if (checked.error) throw new HttpError(410, 'This QR code is no longer valid. Scan the QR on the bus again.', { code: 'QR_EXPIRED' });
+  const tripRaw = checked.trip;
   if (bus) {
     const busRow = await get('SELECT number FROM buses WHERE id = ?', tripRaw.bus_id);
     if (!busRow || busRow.number.toLowerCase() !== bus.toLowerCase()) throw new HttpError(410, 'This QR code belongs to a different bus. Scan the QR on this bus.', { code: 'QR_EXPIRED' });

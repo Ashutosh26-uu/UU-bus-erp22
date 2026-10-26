@@ -15,7 +15,8 @@ try { const d = localStorage.getItem(DEVICE_KEY); if (d) api.extraHeaders['X-Dev
 const rememberDevice = (tok) => { if (!tok) return; api.extraHeaders['X-Device-Token'] = tok; try { localStorage.setItem(DEVICE_KEY, tok); } catch { /* ignore */ } };
 
 const ERRORS = {
-  QR_EXPIRED: ['⏱️', 'QR code expired', 'The QR on the bus screen changes every few seconds. Point your camera at the live QR and scan again.', 'danger'],
+  QR_EXPIRED: ['⏱️', 'QR code not valid', 'This QR code has expired or was replaced. Scan the QR shown on your bus right now.', 'danger'],
+  NO_TRIP: ['🚌', 'Trip not started yet', 'This bus has no trip running right now. Ask the incharge to start the trip, then scan the QR again.', 'warn'],
   SESSION_EXPIRED: ['⏱️', 'Time is up', 'Your check-in window closed. Scan the QR again and finish within a few minutes.', 'warn'],
   NO_SESSION: ['📷', 'Scan the bus QR', 'Open your phone camera and scan the QR code on the bus screen to board.', ''],
   TRIP_ENDED: ['🛑', 'Trip has ended', 'The incharge closed this trip. If you are on the bus, ask them to mark you manually.', 'danger'],

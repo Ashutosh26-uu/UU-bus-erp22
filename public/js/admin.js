@@ -583,10 +583,21 @@ async function renderAudit() {
 // ------------------------------------------------------------------ settings
 async function renderSettings() {
   const s = await api.get('/api/admin/settings');
+  const day = s.qrMode === 'day';
   content.innerHTML = `
+    <div class="card stack">
+      <div class="row between wrap">
+        <div><h2>QR validity</h2><p class="muted small">How long a bus QR code keeps working. Changes apply to every bus screen within a few minutes.</p></div>
+        <span class="pill ${day ? 'warn' : 'success'}">${day ? 'Whole day' : `Rotating every ${s.qrRotateSec}s`}</span>
+      </div>
+      <form id="qrForm" class="choice">
+        <label><input type="radio" name="qr_mode" value="day" ${day ? 'checked' : ''}><span class="bold">Whole day</span><span class="xs muted">One QR per bus per day (India time). Can be printed. A photo of it also works all day, so an absent student could check in if someone forwards it; the incharge can press <b>New QR code</b> to cancel it.</span></label>
+        <label><input type="radio" name="qr_mode" value="rotating" ${day ? '' : 'checked'}><span class="bold">Rotating every ${s.qrRotateSec}s</span><span class="xs muted">Works only from the live bus screen. Screenshots and forwarded links stop working within ${s.qrRotateSec * 2}s. Strongest protection against remote check-ins.</span></label>
+      </form>
+    </div>
     <div class="grid cols-2">
       <div class="card stack">
-        <div><h2>QR link address</h2><p class="muted small">The QR codes encode this address. Student phones must be able to open it: ${s.serverless ? 'on Vercel that is your production domain (custom domain if you added one).' : "on a local network it is your computer's Wi-Fi IP; in production it is your https domain."}</p></div>
+        <div><h2>QR link address</h2><p class="muted small">The QR codes encode this address. Student phones must be able to open it: ${s.serverless ? 'on a hosted deployment that is your production domain (custom domain if you added one).' : "on a local network it is your computer's Wi-Fi IP; in production it is your https domain."}</p></div>
         <form id="setForm" class="stack">
           <div class="field"><label>Public base URL</label><input class="input mono" name="base_url" value="${esc(s.base_url)}" placeholder="${s.serverless ? 'https://bus.your-college.edu' : `http://${esc(s.lanIp)}:${s.port}`}"><div class="help">Leave empty to auto-detect (${esc(s.envBaseUrl || (s.serverless ? 'the Vercel production domain' : `http://${s.lanIp}:${s.port}`))}).</div></div>
           <div class="card soft small">Currently in use: <code>${esc(s.effectiveBaseUrl)}</code></div>
@@ -597,8 +608,8 @@ async function renderSettings() {
       <div class="card stack">
         <div><h2>Security profile</h2><p class="muted small">Set in ${s.serverless ? 'the Vercel environment variables' : '<code>.env</code>'} and applied at start.</p></div>
         <div class="feed">
-          <div class="feed-item"><div class="meta"><span class="name">${s.serverless ? 'Serverless (Vercel)' : 'Single server'} · ${s.database === 'turso' ? 'Turso database' : s.database === 'sqlite' ? 'local SQLite file' : 'libSQL file'}</span><span class="sub">Live updates ${s.liveMode === 'poll' ? 'arrive by polling every ~2.5 s' : 'are pushed instantly'}.</span></div></div>
-          <div class="feed-item"><div class="meta"><span class="name">QR rotates every ${s.qrRotateSec}s</span><span class="sub">A screenshot or forwarded link stops working within ${s.qrRotateSec * 2}s.</span></div></div>
+          <div class="feed-item"><div class="meta"><span class="name">${s.serverless ? 'Serverless hosting' : 'Single server'} · ${s.database === 'turso' ? 'Turso database' : s.database === 'sqlite' ? 'local SQLite file' : 'libSQL file'}</span><span class="sub">Live updates ${s.liveMode === 'poll' ? 'arrive by polling every few seconds' : 'are pushed instantly'}.</span></div></div>
+          <div class="feed-item"><div class="meta"><span class="name">${day ? 'QR valid for the whole day' : `QR rotates every ${s.qrRotateSec}s`}</span><span class="sub">${day ? 'Same QR all day per bus; New QR code cancels it.' : `A screenshot or forwarded link stops working within ${s.qrRotateSec * 2}s.`}</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">${s.checkinMinutes} minute check-in window</span><span class="sub">After scanning, the student must finish within this time.</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">One phone = one student</span><span class="sub">A phone is linked to the first student who boards with it. Max ${s.maxDevicesPerStudent} phones per student per 30 days.</span></div></div>
           <div class="feed-item"><div class="meta"><span class="name">Server-side identity</span><span class="sub">Name, course, year, stop all come from the database; the phone only sends ID + name and can't alter them.</span></div></div>
@@ -607,5 +618,11 @@ async function renderSettings() {
       </div>
     </div>`;
   const form = $('#setForm');
-  formHandler(form, $('button[type=submit]', form), async (v) => { const r = await api.put('/api/admin/settings', v); toast(`Saved · QR links now use ${r.effectiveBaseUrl}`, 'success'); renderSettings(); });
+  formHandler(form, $('button[type=submit]', form), async (v) => { const r = await api.put('/api/admin/settings', { base_url: v.base_url }); toast(`Saved · QR links now use ${r.effectiveBaseUrl}`, 'success'); renderSettings(); });
+  $('#qrForm').addEventListener('change', async (e) => {
+    const mode = e.target.value;
+    if (mode === 'day' && !(await confirmDialog('Switch to whole-day QR codes? Each bus QR will work all day, including photos of it, so remote check-ins become possible if a QR is shared. Incharges can cancel a leaked QR with New QR code.', { title: 'Whole-day QR', okText: 'Switch' }))) { renderSettings(); return; }
+    try { await api.put('/api/admin/settings', { qr_mode: mode }); toast(mode === 'day' ? 'QR codes now work for the whole day' : `QR codes now rotate every ${s.qrRotateSec}s`, 'success'); } catch (err) { toast(err.message, 'error'); }
+    renderSettings();
+  });
 }

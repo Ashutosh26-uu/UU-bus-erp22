@@ -47,7 +47,7 @@ async function init() {
 async function loadState() {
   try {
     const s = await api.get(`/api/incharge/state${scopedNumber ? `?bus=${encodeURIComponent(scopedNumber)}` : ''}`);
-    state = { buses: s.buses, activeTrips: s.activeTrips, rotateSec: s.qr.rotateSec, baseUrl: s.qr.baseUrl };
+    state = { buses: s.buses, activeTrips: s.activeTrips, rotateSec: s.qr.rotateSec, baseUrl: s.qr.baseUrl, qrMode: s.qr.mode || 'rotating' };
     bus = s.scopedBus;
     paintHeader();
     if (!bus) {
@@ -155,7 +155,9 @@ function renderStart() {
             <li>You see the count and names update live. Flags show anything unusual.</li>
             <li>End the trip when everyone has boarded.</li>
           </ol>
-          <p class="xs faint mt">This QR is unique to Bus ${esc(bus.number)}, changes every ${state.rotateSec}s and only works from the live screen. Screenshots and forwarded links expire immediately, and each phone can board only one student.</p>
+          <p class="xs faint mt">${state.qrMode === 'day'
+            ? `This QR is unique to Bus ${esc(bus.number)} and works all day today for whichever trip is running, so you can also print it. If a photo of it gets shared, press <b>New QR code</b> and the old one stops working. Each phone can board only one student.`
+            : `This QR is unique to Bus ${esc(bus.number)}, changes every ${state.rotateSec}s and only works from the live screen. Screenshots and forwarded links expire immediately, and each phone can board only one student.`}</p>
         </div>
       </div>
     </div>`;
@@ -182,14 +184,22 @@ async function openTrip(id) {
   requestWakeLock();
 }
 
+let renderedMode = null;
+let validUntil = 0;
+
 function renderLive() {
   const t = trip;
+  const day = state.qrMode === 'day';
+  renderedMode = state.qrMode;
+  const link = `${esc(state.baseUrl.replace(/^https?:\/\//, ''))}/checkin/${esc(t.bus_number)}`;
   view.innerHTML = `
     <div class="live-grid">
       <div class="card qr-panel">
         <div class="row between" data-full>
           <div class="row"><span class="pill live">Live</span><span class="bold">Bus ${esc(t.bus_number)}</span><span class="pill accent">${directionIcon(t.direction)} ${directionLabel(t.direction)}</span></div>
-          <span class="pill outline" title="Seconds until the QR changes">↻ <span id="ringText">—</span>s</span>
+          ${day
+            ? '<span class="pill success" title="This QR works for the whole day">Valid all day</span>'
+            : '<span class="pill outline" title="Seconds until the QR changes">↻ <span id="ringText">—</span>s</span>'}
         </div>
         <div class="qr-stage">
           <svg class="qr-ring" viewBox="0 0 100 100" aria-hidden="true">
@@ -200,9 +210,10 @@ function renderLive() {
           <div class="qr-paper" id="qrPaper"><div class="spinner lg"></div></div>
           <div class="qr-overlay hidden" id="qrOverlay">Reconnecting…</div>
         </div>
-        <div><div class="bold">Bus ${esc(t.bus_number)} · scan with your phone camera to board</div><div class="qr-caption">New code every ${state.rotateSec}s · ${esc(state.baseUrl.replace(/^https?:\/\//, ''))}/checkin/${esc(t.bus_number)}</div></div>
-        <div class="row">
+        <div><div class="bold">Bus ${esc(t.bus_number)} · scan with your phone camera to board</div><div class="qr-caption" id="qrCaption">${day ? `Valid all day today · ${link}` : `New code every ${state.rotateSec}s · ${link}`}</div></div>
+        <div class="row wrap">
           <button class="btn sm" id="kioskBtn">${ICONS.expand}<span>Full screen</span></button>
+          ${day ? `<button class="btn sm hide-kiosk" id="printBtn">${ICONS.download}<span>Print QR</span></button><button class="btn sm ghost hide-kiosk" id="newQrBtn" title="Old QR codes of this bus stop working immediately">↻ New QR code</button>` : ''}
           <button class="btn sm ghost" id="soundBtn" title="Sound on new boarding">${soundOn ? '🔔' : '🔕'}</button>
         </div>
       </div>
@@ -228,6 +239,8 @@ function renderLive() {
     </div>`;
   $('#kioskBtn').addEventListener('click', () => setKiosk(!document.body.classList.contains('kiosk')));
   $('#soundBtn').addEventListener('click', (e) => { soundOn = !soundOn; e.currentTarget.textContent = soundOn ? '🔔' : '🔕'; unlockAudio(); });
+  $('#printBtn')?.addEventListener('click', () => window.print());
+  $('#newQrBtn')?.addEventListener('click', newQrCode);
   $('#manualBtn').addEventListener('click', openManual);
   $('#endBtn').addEventListener('click', endTrip);
   paintCounts();
@@ -282,10 +295,17 @@ async function refreshQr() {
   try {
     const q = await api.get(`/api/incharge/trips/${trip.id}/qr`);
     if (!trip || !paper) return;
+    state.rotateSec = q.rotateSec;
+    if (q.mode && q.mode !== renderedMode) {
+      // an admin switched the QR mode: redraw the screen for the new mode
+      state.qrMode = q.mode;
+      renderLive();
+      return refreshQr();
+    }
     paper.innerHTML = q.svg;
     paper.classList.remove('stale');
     overlay.classList.add('hidden');
-    state.rotateSec = q.rotateSec;
+    validUntil = q.validUntil || 0;
     nextRotateAt = Date.now() + q.secondsLeft * 1000;
     qrTimer = setTimeout(refreshQr, q.secondsLeft * 1000 + 120);
   } catch (e) {
@@ -305,7 +325,10 @@ function startRing() {
     const bar = $('#ringBar');
     if (bar) {
       const left = Math.max(0, nextRotateAt - Date.now());
-      const frac = state.rotateSec ? left / (state.rotateSec * 1000) : 0;
+      // whole-day QR: the ring shows how much of today is left instead of a 20 s countdown
+      const frac = renderedMode === 'day'
+        ? Math.max(0, Math.min(1, (validUntil - Date.now()) / 86_400_000))
+        : state.rotateSec ? left / (state.rotateSec * 1000) : 0;
       bar.setAttribute('stroke-dasharray', String(C));
       bar.setAttribute('stroke-dashoffset', String(C * (1 - frac)));
       const t = $('#ringText');
@@ -376,6 +399,17 @@ async function endTrip() {
     toast(`Trip ended · ${r.trip.counts.boarded} boarded`, 'success');
     loadState();
   } catch (e) { toast(e.message, 'error'); if (trip) refreshQr(); }
+}
+
+// ------------------------------------------------------------------ whole-day QR: replace it
+async function newQrCode() {
+  const ok = await confirmDialog(`Make a new QR code for Bus ${trip.bus_number}? The current one stops working immediately, including printed copies and photos of it. Students who already boarded are not affected.`, { title: 'New QR code', okText: 'Make new QR' });
+  if (!ok) return;
+  try {
+    await api.post(`/api/incharge/trips/${trip.id}/new-qr`);
+    toast('New QR code is live. Reprint it if you use a printed copy.', 'success');
+    refreshQr();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ------------------------------------------------------------------ manual check-in

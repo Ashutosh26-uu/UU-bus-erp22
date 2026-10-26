@@ -85,8 +85,11 @@ Useful scripts:
 
 1. **Incharge** signs in, lands on their bus portal, picks the direction (to / from college)
    and presses *Start trip*.
-2. The portal shows the bus's QR with a countdown ring. The QR encodes `/checkin/<bus>` with a
-   token that is an HMAC of the trip's secret and the current 20-second time slot.
+2. The portal shows the bus's QR. It encodes `/checkin/<bus>` with a signed token. There are two
+   modes (Admin → Settings → QR validity):
+   * **Whole day** (default): one QR per bus per calendar day, India time. It works for whichever
+     trip the bus is running, can be printed, and **New QR code** on the bus portal cancels it.
+   * **Rotating**: a new QR every 20 seconds, bound to the trip; only the live screen works.
 3. **Student** scans with the normal camera app. The server validates the token, opens a
    5-minute check-in session bound to that phone, and asks for name + student ID.
 4. Both must match the database record. Everything shown (course, year, specialization, stop,
@@ -103,7 +106,7 @@ Useful scripts:
 
 | Threat | Defence |
 | --- | --- |
-| Screenshot / forwarded QR | Token rotates every 20 s and is accepted for at most 40 s. Old, tampered or future tokens are rejected. Only the live screen works. |
+| Screenshot / forwarded QR | **Rotating mode:** token changes every 20 s and is accepted for at most 40 s; only the live screen works. **Whole-day mode:** a photo of the QR works until midnight, so an absent student *can* check in if someone forwards it. The incharge sees every name live and can press **New QR code** to cancel a leaked QR; switch to rotating mode for the strongest protection. Tampered, old-day or future tokens are rejected in both modes. |
 | Friend scans and types your ID | **One phone, one student.** The phone is identified by a signed HttpOnly cookie mirrored in localStorage; the first student who boards with a phone owns it. Another student on that phone is refused. A phone can board only one student per trip. |
 | Student uses many phones | Max 2 phones per student per 30 days; after that admin must reset devices (Students → history). First boarding from a new phone is flagged **new_device**. |
 | Boarding the wrong bus | Allowed (students do switch buses) but flagged **wrong_bus**; the incharge sees it live. |
@@ -132,7 +135,8 @@ Copy `.env.example` to `.env`. Everything is optional.
 | `TRUST_PROXY` | off | set `1` behind nginx / Cloudflare so real IPs are logged and limited |
 | `SESSION_SECRET` | generated once into `data/secret.key` | signing key for sessions, device ids and QR tokens |
 | `SESSION_HOURS` | `12` | staff session idle lifetime |
-| `QR_ROTATE_SECONDS` | `20` | QR refresh interval (minimum 10) |
+| `QR_MODE` | `day` | QR mode until an admin changes it in Settings: `day` (one QR per bus per day) or `rotating` |
+| `QR_ROTATE_SECONDS` | `20` | rotating mode: QR refresh interval (minimum 10) |
 | `QR_GRACE_SLOTS` | `1` | how many previous QR windows are still valid |
 | `CHECKIN_MINUTES` | `5` | time a student has to finish after scanning |
 | `MAX_DEVICES_PER_STUDENT` | `2` | phones a student may use in 30 days |

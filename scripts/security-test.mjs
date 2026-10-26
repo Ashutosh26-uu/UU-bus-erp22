@@ -6,7 +6,7 @@
  * Simulates different phones with separate cookie jars and creates/removes its own temporary
  * incharge account. Uses bus 12 of the seeded fleet. Safe to re-run.
  */
-import { tokenFor } from '../src/services/qr.js';
+import { tokenFor, dayTokenFor } from '../src/services/qr.js';
 import { get } from '../src/db.js';
 
 const BASE = (process.env.BASE || 'http://localhost:3000').replace(/\/+$/, '');
@@ -118,8 +118,13 @@ ok(r.status === 403, 'incharge cannot open admin API -> 403', r.status);
 r = await call(inch, 'POST', '/api/incharge/trips', { bus_id: otherBus.id, direction: 'to_college' }, icsrf);
 ok(r.status === 403, 'incharge cannot start a trip for another bus -> 403', r.status);
 
-// ---------------------------------------------------------------- qr tokens
-console.log('\n[qr token]');
+// ---------------------------------------------------------------- qr tokens (rotating mode)
+console.log('\n[qr token: rotating]');
+const ORIGINAL_QR_MODE = (await call(admin, 'GET', '/api/admin/settings')).data.qrMode;
+r = await call(admin, 'PUT', '/api/admin/settings', { qr_mode: 'rotating' }, csrf);
+ok(r.status === 200 && r.data.qrMode === 'rotating', 'admin switches QR to rotating');
+r = await call(inch, 'PUT', '/api/admin/settings', { qr_mode: 'day' }, icsrf);
+ok(r.status === 403, 'incharge cannot change the QR mode -> 403', r.status);
 r = await call(admin, 'POST', '/api/incharge/trips', { bus_id: bus12.id, direction: 'from_college' }, csrf);
 let trip = r.data.trip;
 ok(r.status === 201, 'start trip 1');
@@ -138,6 +143,35 @@ r = await call(jar(), 'POST', '/api/checkin/session', { token: tokenFor(rawTrip,
 ok(r.status === 410, 'token from 2 minutes ago -> 410 (screenshots defeated)', r.status);
 r = await call(jar(), 'POST', '/api/checkin/session', { token: tokenFor(rawTrip, Date.now() + 60_000) });
 ok(r.status === 410, 'token from the future -> 410', r.status);
+
+// ---------------------------------------------------------------- qr tokens (whole-day mode)
+console.log('\n[qr token: whole day]');
+r = await call(admin, 'PUT', '/api/admin/settings', { qr_mode: 'day' }, csrf);
+ok(r.status === 200 && r.data.qrMode === 'day', 'admin switches QR to whole day');
+let q = (await call(admin, 'GET', `/api/incharge/trips/${trip.id}/qr`)).data;
+ok(q.mode === 'day' && /\/checkin\/12\?t=d/.test(q.url) && q.validUntil > Date.now() + 1000, 'day QR is a per-bus code valid until midnight', JSON.stringify({ mode: q.mode, url: q.url }));
+const dayTok = q.token;
+r = await call(jar(), 'POST', '/api/checkin/session', { token: dayTok, bus: '12' });
+ok(r.status === 200 && r.data.trip.id === trip.id, "today's QR opens the running trip");
+const q2 = (await call(admin, 'GET', `/api/incharge/trips/${trip.id}/qr`)).data;
+ok(q2.token === dayTok, 'day QR stays the same between refreshes');
+r = await call(jar(), 'POST', '/api/checkin/session', { token: await dayTokenFor(bus12.id, Date.now() - 86_400_000) });
+ok(r.status === 410, "yesterday's QR -> 410", r.status);
+r = await call(jar(), 'POST', '/api/checkin/session', { token: dayTok.slice(0, -2) + 'zz' });
+ok(r.status === 410, 'tampered day QR -> 410', r.status);
+r = await call(jar(), 'POST', '/api/checkin/session', { token: await dayTokenFor(otherBus.id) });
+ok(r.status === 409 && r.data.code === 'NO_TRIP', 'day QR of a bus with no running trip -> NO_TRIP', r.status);
+r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/new-qr`, {}, csrf);
+ok(r.status === 200, 'New QR code');
+r = await call(jar(), 'POST', '/api/checkin/session', { token: dayTok });
+ok(r.status === 410, 'old day QR stops working after New QR code', r.status);
+q = (await call(admin, 'GET', `/api/incharge/trips/${trip.id}/qr`)).data;
+r = await call(jar(), 'POST', '/api/checkin/session', { token: q.token });
+ok(q.token !== dayTok && r.status === 200, 'the new day QR works');
+r = await call(admin, 'PUT', '/api/admin/settings', { qr_mode: 'rotating' }, csrf);
+r = await call(jar(), 'POST', '/api/checkin/session', { token: q.token });
+ok(r.status === 410, 'switching back to rotating cancels day QRs', r.status);
+await call(admin, 'PUT', '/api/admin/settings', { qr_mode: ORIGINAL_QR_MODE }, csrf);
 
 const scan = async (j) => call(j, 'POST', '/api/checkin/session', { token: await freshToken() });
 const board = async (j, [uuid, name]) => {

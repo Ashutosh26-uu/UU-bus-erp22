@@ -112,6 +112,8 @@ export const config = Object.freeze({
   trustProxy: env.TRUST_PROXY ? parseTrustProxy(env.TRUST_PROXY) : SERVERLESS,
   sessionSecret,
   sessionTtlMs: (Number(env.SESSION_HOURS) || 12) * 3_600_000,
+  /** Default QR mode until an admin changes it: 'day' (one QR per bus per day) or 'rotating'. */
+  qrModeDefault: env.QR_MODE === 'rotating' ? 'rotating' : 'day',
   qrRotateSec: Math.max(10, Number(env.QR_ROTATE_SECONDS) || 20),
   qrGraceSlots: Math.max(0, Number(env.QR_GRACE_SLOTS ?? 1)),
   checkinTtlMs: (Number(env.CHECKIN_MINUTES) || 5) * 60_000,

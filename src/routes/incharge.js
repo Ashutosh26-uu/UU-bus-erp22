@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { HttpError, validate, intParam } from '../http.js';
 import { requireAuth, canAccessBus } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
-import { tokenFor, checkinUrl, qrSvg, secondsLeftInSlot, baseUrl } from '../services/qr.js';
+import { tokenFor, dayTokenFor, regenerateDayQr, qrMode, endOfIstDay, checkinUrl, qrSvg, secondsLeftInSlot, baseUrl } from '../services/qr.js';
 import { getTrip, getTripRaw, tripSummary, startTrip, endTrip, canAccessTrip, withCounts } from '../services/trips.js';
 import { manualCheckin, studentByUuid } from '../services/checkins.js';
 
@@ -53,7 +53,7 @@ router.get('/state', async (req, res) => {
       : await all("SELECT id FROM trips WHERE status = 'active' AND (incharge_id = ? OR bus_id = ?) ORDER BY started_at DESC", u.id, u.bus_id);
   }
   const activeTrips = await Promise.all(activeIds.map(async (r) => withCounts(await getTrip(r.id))));
-  res.json({ user: u, buses, activeTrips, scopedBus, qr: { rotateSec: config.qrRotateSec, baseUrl: await baseUrl(req) } });
+  res.json({ user: u, buses, activeTrips, scopedBus, qr: { mode: await qrMode(), rotateSec: config.qrRotateSec, baseUrl: await baseUrl(req) } });
 });
 
 /** Portal picker: every bus with its live status (admins and unassigned incharges see all). */
@@ -99,12 +99,33 @@ router.get('/trips/:id', async (req, res) => {
 router.get('/trips/:id/qr', async (req, res) => {
   const trip = await tripForUser(req);
   if (trip.status !== 'active') throw new HttpError(410, 'Trip has ended', { code: 'TRIP_ENDED' });
-  const raw = await getTripRaw(trip.id);
-  const token = tokenFor(raw);
+  const mode = await qrMode();
+  const now = Date.now();
+  let token;
+  let secondsLeft;
+  let validUntil;
+  if (mode === 'day') {
+    token = await dayTokenFor(trip.bus_id, now);
+    validUntil = endOfIstDay(now);
+    // the code itself only changes at midnight or on "New QR code"; re-check every few minutes
+    secondsLeft = Math.max(1, Math.min(300, Math.ceil((validUntil - now) / 1000)));
+  } else {
+    token = tokenFor(await getTripRaw(trip.id), now);
+    secondsLeft = secondsLeftInSlot(now);
+    validUntil = now + secondsLeft * 1000 + config.qrGraceSlots * config.qrRotateSec * 1000;
+  }
   const url = await checkinUrl(token, trip.bus_number, req);
   const svg = await qrSvg(url);
   res.set('Cache-Control', 'no-store');
-  res.json({ token, url, svg, rotateSec: config.qrRotateSec, secondsLeft: secondsLeftInSlot(), serverTime: Date.now() });
+  res.json({ mode, token, url, svg, rotateSec: config.qrRotateSec, secondsLeft, validUntil, serverTime: now });
+});
+
+/** Whole-day mode: replace this bus's QR now (e.g. a photo of it was shared). */
+router.post('/trips/:id/new-qr', async (req, res) => {
+  const trip = await tripForUser(req);
+  await regenerateDayQr(trip.bus_id);
+  await audit(req, 'qr.regenerate', 'bus', trip.bus_id, `bus ${trip.bus_number}`);
+  res.json({ ok: true });
 });
 
 router.post('/trips/:id/end', async (req, res) => {

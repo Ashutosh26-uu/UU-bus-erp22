@@ -418,3 +418,16 @@ button.feed-item:focus-visible { outline: none; box-shadow: var(--ring); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ------------------------------------------------------------------ print: just the bus QR */
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff !important; }
+  .incharge > header, .live-grid > .stack, .qr-panel > .row, .toasts, .modal-root, .qr-ring, .qr-overlay { display: none !important; }
+  .incharge, .live-grid { display: block; padding: 0; max-width: none; }
+  .qr-panel { box-shadow: none !important; border: 0 !important; background: #fff !important; }
+  .qr-panel, .qr-panel * { color: #000 !important; }
+  .qr-stage { width: 100%; max-width: 160mm; margin: 0 auto; }
+  .qr-paper { width: 100%; box-shadow: none !important; padding: 0; }
+  .qr-panel .bold { font-size: 20pt; }
+}
