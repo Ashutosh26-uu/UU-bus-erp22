@@ -4,7 +4,12 @@ const form = $('#loginForm');
 const pw = $('#password');
 const toggle = $('#togglePw');
 toggle.innerHTML = ICONS.eye;
-toggle.addEventListener('click', () => { pw.type = pw.type === 'password' ? 'text' : 'password'; });
+toggle.addEventListener('click', () => {
+  const show = pw.type === 'password';
+  pw.type = show ? 'text' : 'password';
+  toggle.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+  toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+});
 // focus the username box on wide screens only; on phones it would pop the keyboard over the photo
 if (matchMedia('(min-width: 861px)').matches) $('#username').focus();
 

@@ -5,7 +5,8 @@
  * scripts, against the local SQLite file or Turso.
  */
 import { all, batch, now } from '../db.js';
-import { hashPassword, generatePassword } from '../security.js';
+import { hashPassword, generatePassword, sealPassword } from '../security.js';
+import { config } from '../config.js';
 
 export const FLEET = [
   { number: '1', name: 'Rajpur Line', route: 'Rajpur Road → Survey Chowk → Clock Tower → Campus', stops: ['Rajpur Road', 'Sahastradhara Crossing', 'Survey Chowk', 'Clock Tower', 'Prem Nagar'] },
@@ -60,9 +61,9 @@ export async function seedFleet() {
     if (!users.has(username)) {
       const password = generatePassword(12);
       stmts.push([
-        `INSERT OR IGNORE INTO users(username, name, role, password_hash, bus_id, active, must_change_password, created_at, updated_at)
-         SELECT ?, ?, 'incharge', ?, id, 1, 0, ?, ? FROM buses WHERE number = ?`,
-        username, `Bus ${b.number} Admin`, hashPassword(password), t, t, b.number,
+        `INSERT OR IGNORE INTO users(username, name, role, password_hash, password_view, bus_id, active, must_change_password, created_at, updated_at)
+         SELECT ?, ?, 'incharge', ?, ?, id, 1, 0, ?, ? FROM buses WHERE number = ?`,
+        username, `Bus ${b.number} Admin`, hashPassword(password), sealPassword(password, config.sessionSecret), t, t, b.number,
       ]);
       created.incharges.push({ username, password, bus: b.number });
     }

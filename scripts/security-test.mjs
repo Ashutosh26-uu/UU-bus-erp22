@@ -113,6 +113,24 @@ ok(r.status === 200, 'bus admin signs in with the password the super admin set')
 icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
 r = await call(admin, 'POST', `/api/admin/users/${(await call(admin, 'GET', '/api/admin/users')).data.items.find((x) => x.username === 'admin')?.id}/password`, {}, csrf);
 ok(r.status === 400, 'super admin cannot reset their own password from the staff list', r.status);
+r = await call(admin, 'GET', `/api/admin/users/${testInchargeId}/password`);
+ok(r.status === 200 && r.data.password === 'Incharge12fresh', 'super admin can view the bus admin password they set', r.status);
+r = await call(admin, 'GET', '/api/admin/users');
+ok(r.data.items.find((x) => x.id === testInchargeId)?.password_viewable === 1 && !('password_view' in r.data.items[0]) && !('password_hash' in r.data.items[0]), 'staff list says it is viewable without exposing any password data');
+r = await call(admin, 'POST', `/api/admin/users/${testInchargeId}/password`, {}, csrf);
+const generatedPw = r.data.password;
+r = await call(admin, 'GET', `/api/admin/users/${testInchargeId}/password`);
+ok(r.status === 200 && generatedPw && r.data.password === generatedPw, 'a generated password can be viewed too');
+r = await call(admin, 'POST', `/api/admin/users/${testInchargeId}/password`, { password: 'Incharge12fresh' }, csrf);
+r = await call(admin, 'GET', `/api/admin/users/${(await call(admin, 'GET', '/api/admin/users')).data.items.find((x) => x.username === 'admin')?.id}/password`);
+ok(r.status === 403 && r.data.code === 'NOT_VIEWABLE', 'super admin passwords are never viewable', r.status);
+inch = jar();
+r = await call(inch, 'POST', '/api/auth/login', { username: 'testincharge12', password: 'Incharge12fresh' });
+icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
+r = await call(inch, 'GET', `/api/admin/users/${testInchargeId}/password`);
+ok(r.status === 403, 'a bus admin cannot view passwords (not even their own) -> 403', r.status);
+r = await call(admin, 'GET', '/api/admin/audit');
+ok(r.data.items.some((a) => a.action === 'user.password.view'), 'every password view is in the audit log');
 r = await call(inch, 'GET', '/api/incharge/state?bus=12');
 ok(r.status === 200 && r.data.scopedBus?.number === '12' && r.data.buses.length === 1, 'incharge sees only its own bus portal');
 r = await call(inch, 'GET', `/api/incharge/state?bus=${encodeURIComponent(otherBus.number)}`);
@@ -317,7 +335,7 @@ for (const p of ['/api/admin/dashboard', '/api/admin/students', '/api/admin/buse
   r = await call(op, 'GET', p);
   ok(r.status === 200, `operations admin can view ${p.split('?')[0]}`, r.status);
 }
-for (const p of ['/api/admin/users', '/api/admin/audit', '/api/admin/settings', '/api/admin/students/export.csv', `/api/incharge/trips/${trip.id}/qr`]) {
+for (const p of ['/api/admin/users', `/api/admin/users/${testInchargeId}/password`, '/api/admin/audit', '/api/admin/settings', '/api/admin/students/export.csv', `/api/incharge/trips/${trip.id}/qr`]) {
   r = await call(op, 'GET', p);
   ok(r.status === 403, `operations admin cannot open ${p}`, r.status);
 }

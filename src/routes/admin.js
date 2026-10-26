@@ -4,7 +4,10 @@ import { all, get, run, batch, batchChunks, now, getSetting, setSetting, dbKind 
 import { config, lanIp } from '../config.js';
 import { HttpError, validate, intParam } from '../http.js';
 import { requireAuth, operatorReadOnly } from '../middleware/auth.js';
-import { hashPassword, generatePassword, passwordProblem, normUuid } from '../security.js';
+import { hashPassword, generatePassword, passwordProblem, normUuid, sealPassword, openPassword } from '../security.js';
+
+/** Encrypted copy for later viewing: only for passwords the super admin issues (never a super admin's own). */
+const viewCopy = (role, password) => (role === 'admin' ? null : sealPassword(password, config.sessionSecret));
 import { audit } from '../services/audit.js';
 import { parseCsv, toCsv, mapHeaders } from '../services/csv.js';
 import { tripSummary, listTrips, activeTrips, endTrip } from '../services/trips.js';
@@ -381,6 +384,7 @@ router.get('/users', async (req, res) => {
   res.json({
     items: await all(
       `SELECT u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password, u.locked_until, u.created_at, b.number AS bus_number,
+              (u.password_view IS NOT NULL) AS password_viewable,
               (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id = u.id) AS last_seen
          FROM users u LEFT JOIN buses b ON b.id = u.bus_id ORDER BY CASE u.role WHEN 'admin' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END, CAST(b.number AS INTEGER), b.number, u.name COLLATE NOCASE`,
     ),
@@ -396,9 +400,9 @@ router.post('/users', async (req, res) => {
   if (problem) throw new HttpError(400, problem);
   const t = now();
   const id = (await run(
-    'INSERT INTO users(username,name,role,password_hash,bus_id,active,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO users(username,name,role,password_hash,password_view,bus_id,active,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
     // only super admins pick their own password later; bus and operations admins keep the one set here
-    d.username, d.name, d.role, hashPassword(password), d.role === 'incharge' ? d.bus_id : null, d.active, d.role === 'admin', t, t,
+    d.username, d.name, d.role, hashPassword(password), viewCopy(d.role, password), d.role === 'incharge' ? d.bus_id : null, d.active, d.role === 'admin', t, t,
   )).lastInsertRowid;
   await audit(req, 'user.create', 'user', id, `${d.username} (${d.role})`);
   res.status(201).json({ id, password });
@@ -414,6 +418,8 @@ router.put('/users/:id', async (req, res) => {
   if (d.bus_id != null && !(await get('SELECT id FROM buses WHERE id = ?', d.bus_id))) throw new HttpError(400, 'Bus not found');
   await run('UPDATE users SET username=?, name=?, role=?, bus_id=?, active=?, updated_at=? WHERE id = ?', d.username, d.name, d.role, d.role === 'incharge' ? d.bus_id : null, d.active, now(), id);
   if (d.role !== 'admin') await run('UPDATE users SET must_change_password = 0 WHERE id = ?', id);
+  // a super admin chooses their own password: never keep a viewable copy of it
+  else await run('UPDATE users SET password_view = NULL WHERE id = ?', id);
   if (!d.active) await run('DELETE FROM sessions WHERE user_id = ?', id);
   await audit(req, 'user.update', 'user', id, `${d.username} (${d.role})${d.active ? '' : ' deactivated'}`);
   res.json({ ok: true });
@@ -433,11 +439,29 @@ router.post('/users/:id/password', async (req, res) => {
   const problem = passwordProblem(password);
   if (problem) throw new HttpError(400, problem);
   await batch([
-    ['UPDATE users SET password_hash = ?, must_change_password = ?, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?', hashPassword(password), u.role === 'admin', now(), id],
+    ['UPDATE users SET password_hash = ?, password_view = ?, must_change_password = ?, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?', hashPassword(password), viewCopy(u.role, password), u.role === 'admin', now(), id],
     ['DELETE FROM sessions WHERE user_id = ?', id],
   ]);
   await audit(req, 'user.password.set', 'user', id, `${u.username}${chosen ? ' (chosen by super admin)' : ' (generated)'}`);
   res.json({ password: chosen ? null : password, generated: !chosen });
+});
+
+/**
+ * Super admin looks up the password of a bus or operations admin (the ones only they can set).
+ * Super admins' passwords are never viewable. Every view is written to the audit log.
+ */
+router.get('/users/:id/password', async (req, res) => {
+  const id = intParam(req.params.id);
+  const u = await get('SELECT id, username, name, role, password_view FROM users WHERE id = ?', id);
+  if (!u) throw new HttpError(404, 'User not found');
+  if (u.role === 'admin') throw new HttpError(403, 'Super admin passwords are never shown, not even to other super admins.', { code: 'NOT_VIEWABLE' });
+  const password = u.password_view ? openPassword(u.password_view, config.sessionSecret) : null;
+  if (!password) {
+    throw new HttpError(404, 'This password was set before passwords could be viewed (or the server key changed). Set a new one with the key button, then you can view it here.', { code: 'NOT_STORED' });
+  }
+  await audit(req, 'user.password.view', 'user', id, u.username);
+  res.set('Cache-Control', 'no-store');
+  res.json({ username: u.username, password });
 });
 
 router.delete('/users/:id', async (req, res) => {

@@ -321,7 +321,9 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 * **Bus admin** (role `incharge`, one per bus): signs in straight into their own bus portal,
   starts and ends that bus's trips, shows the QR, sees every student of the bus with who has
   verified, and can mark a student manually. Cannot open another bus, and **cannot change their
-  own password**: only the super admin sets it (Staff → key button).
+  own password**: only the super admin sets it (Staff → key button) and can look it up later
+  (Staff → eye button; stored encrypted, every view is in the audit log). Super admin passwords
+  are never viewable.
 * **Student**: no account, no app, no login. Scan, enter name and student ID, check the details,
   tap Verify. Only students registered on that bus are accepted; anyone else sees "Invalid".
 

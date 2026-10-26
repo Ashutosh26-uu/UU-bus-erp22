@@ -286,6 +286,17 @@ const MIGRATIONS = [
       PRAGMA foreign_keys = ON;
     `,
   },
+  // v4: encrypted copy of passwords the super admin issues to bus and operations admins, so the
+  // super admin can look them up later (super admins' own passwords are never stored this way).
+  {
+    version: 4,
+    script: `
+      ALTER TABLE users ADD COLUMN password_view TEXT;
+      UPDATE schema_version SET version = 4 WHERE version < 4;
+    `,
+    // another serverless instance may have added the column a moment earlier
+    alreadyDone: /duplicate column name/i,
+  },
 ];
 const splitSql = (sql) => sql.split(/;\s*\n/).map((s) => s.trim().replace(/;$/, '')).filter(Boolean);
 
@@ -305,7 +316,8 @@ export async function migrate() {
       } catch (e) {
         try { await d.exec('ROLLBACK'); } catch { /* nothing open */ }
         try { await d.exec('PRAGMA foreign_keys = ON'); } catch { /* ignore */ }
-        throw e;
+        if (!(m.alreadyDone && m.alreadyDone.test(e?.message || ''))) throw e;
+        await d.run(`UPDATE schema_version SET version = ${m.version} WHERE version < ${m.version}`, []);
       }
     }
     version = i + 1;

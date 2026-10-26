@@ -271,6 +271,25 @@ export async function requireStaff(roles) {
   return me.user;
 }
 
+/** A password box with a show/hide eye button. Call wireEyes(container) after inserting it. */
+export function pwInput(name, { placeholder = '', autocomplete = 'new-password', required = false, minlength = 0, id = '' } = {}) {
+  return `<div class="input-wrap"><input class="input" ${id ? `id="${id}" ` : ''}name="${name}" type="password" autocomplete="${autocomplete}" spellcheck="false" autocapitalize="off"${required ? ' required' : ''}${minlength ? ` minlength="${minlength}"` : ''} placeholder="${esc(placeholder)}"><button class="btn icon" type="button" data-eye aria-label="Show password" title="Show password">${ICONS.eye}</button></div>`;
+}
+export function wireEyes(root = document) {
+  $('[data-eye]', root).forEach((b) => {
+    if (b.dataset.wired) return;
+    b.dataset.wired = '1';
+    b.addEventListener('click', () => {
+      const input = b.previousElementSibling;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      b.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+      b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      b.title = show ? 'Hide password' : 'Show password';
+    });
+  });
+}
+
 export function passwordChangeForm({ forced = false } = {}) {
   return new Promise((resolve) => {
     let done = false;
@@ -279,14 +298,15 @@ export function passwordChangeForm({ forced = false } = {}) {
       body: `
         <form id="pwForm" class="stack" autocomplete="off">
           ${forced ? '<p class="muted small">For security you must replace the temporary password before continuing.</p>' : ''}
-          <div class="field"><label>Current password</label><input class="input" name="current" type="password" autocomplete="current-password" required></div>
-          <div class="field"><label>New password</label><input class="input" name="next" type="password" autocomplete="new-password" minlength="10" required><div class="help">At least 10 characters with letters and numbers.</div></div>
-          <div class="field"><label>Repeat new password</label><input class="input" name="again" type="password" autocomplete="new-password" required></div>
+          <div class="field"><label>Current password</label>${pwInput('current', { autocomplete: 'current-password', required: true })}</div>
+          <div class="field"><label>New password</label>${pwInput('next', { minlength: 10, required: true })}<div class="help">At least 10 characters with letters and numbers.</div></div>
+          <div class="field"><label>Repeat new password</label>${pwInput('again', { required: true })}</div>
           <div class="error-text" data-error hidden></div>
           <button class="btn primary block" type="submit">Save password</button>
         </form>`,
       onClose: () => { if (done) return; if (forced) location.reload(); else resolve(false); },
     });
+    wireEyes(m.root);
     if (forced) $('[data-close]', m.root).remove();
     const form = $('#pwForm', m.root);
     formHandler(form, $('button[type=submit]', form), async (v) => {
@@ -350,6 +370,7 @@ export const ICONS = {
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>',
   expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a18.6 18.6 0 0 1-3.2 4.2M6.6 6.6A18 18 0 0 0 1 12s4 7 11 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20"/></svg>',
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>',

@@ -49,10 +49,13 @@ export function unsign(signed, secret) {
 }
 
 const PW_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+/** Random password that always passes passwordProblem(): letters and at least one digit, unambiguous characters. */
 export function generatePassword(len = 14) {
-  let out = '';
-  for (let i = 0; i < len; i++) out += PW_ALPHABET[crypto.randomInt(PW_ALPHABET.length)];
-  return out;
+  for (;;) {
+    let out = '';
+    for (let i = 0; i < Math.max(10, len); i++) out += PW_ALPHABET[crypto.randomInt(PW_ALPHABET.length)];
+    if (/[a-z]/i.test(out) && /\d/.test(out)) return out;
+  }
 }
 
 export function passwordProblem(pw) {
@@ -77,3 +80,29 @@ export function nameMatches(entered, actual) {
 }
 
 export const normUuid = (s) => String(s || '').trim().toUpperCase().replace(/\s+/g, '');
+
+/*
+ * Reversible copy of passwords the super admin hands out (bus and operations admins), so the super
+ * admin can look one up later. AES-256-GCM with a key derived from the server secret; a stolen
+ * database alone cannot be read. If the server secret changes, old copies simply stop opening.
+ */
+const viewKey = (secret) => crypto.createHash('sha256').update(`password-view|${secret}`).digest();
+
+export function sealPassword(plain, secret) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', viewKey(secret), iv);
+  const data = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  return ['v1', iv.toString('base64url'), data.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.');
+}
+
+export function openPassword(sealed, secret) {
+  try {
+    const [v, iv, data, tag] = String(sealed || '').split('.');
+    if (v !== 'v1') return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', viewKey(secret), Buffer.from(iv, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}

@@ -1,7 +1,7 @@
 import {
   $, $$, api, el, esc, toast, modal, confirmDialog, formHandler, formValues, theme, liveEvents,
   fmtTime, fmtDate, fmtDateTime, fmtRel, todayIso, initials, directionLabel, directionIcon, flagPills,
-  requireStaff, logout, passwordChangeForm, copyText, debounce, ICONS, icon,
+  requireStaff, logout, passwordChangeForm, copyText, debounce, ICONS, icon, pwInput, wireEyes,
 } from './common.js';
 
 const ROLE_OPTIONS = [['incharge', 'Bus admin'], ['operator', 'Operations admin'], ['admin', 'Super admin']];
@@ -439,6 +439,7 @@ async function renderStaff() {
       <td>${u.active ? '<span class="pill success">Active</span>' : '<span class="pill">Inactive</span>'}${u.locked_until && u.locked_until > Date.now() ? ' <span class="pill danger">Locked</span>' : ''}${u.role === 'admin' && u.must_change_password ? ' <span class="pill warn" title="Must choose a new password at next sign-in">New password due</span>' : ''}</td>
       <td class="xs muted">${u.last_seen ? fmtRel(u.last_seen) : 'Never'}</td>
       <td class="actions">
+        ${u.role === 'admin' ? '' : `<button class="btn icon sm ghost" data-act="view" data-id="${u.id}" title="${u.password_viewable ? 'View password' : 'Password not viewable yet: set a new one first'}">${ICONS.eye}</button>`}
         <button class="btn icon sm ghost" data-act="password" data-id="${u.id}" title="Set password" ${u.id === user.id ? 'disabled' : ''}>${ICONS.key}</button>
         <button class="btn icon sm ghost" data-act="edit" data-id="${u.id}" title="Edit">${ICONS.edit}</button>
         <button class="btn icon sm ghost" data-act="del" data-id="${u.id}" title="Remove" ${u.id === user.id ? 'disabled' : ''}>${ICONS.trash}</button>
@@ -459,10 +460,52 @@ async function renderStaff() {
     const u = r.items.find((x) => x.id === Number(b.dataset.id));
     if (b.dataset.act === 'edit') userForm(u, buses);
     if (b.dataset.act === 'password') setPasswordDialog(u);
+    if (b.dataset.act === 'view') viewPasswordDialog(u);
     if (b.dataset.act === 'del' && (await confirmDialog(`Remove ${u.name}? Accounts with trip history are deactivated instead.`, { okText: 'Remove', danger: true }))) {
       try { await api.del(`/api/admin/users/${u.id}`); toast('Removed', 'success'); renderStaff(); } catch (err) { toast(err.message, 'error'); }
     }
   });
+}
+
+/** Super admin looks up a bus or operations admin's current password (recorded in the audit log). */
+async function viewPasswordDialog(u) {
+  let r;
+  try {
+    r = await api.get(`/api/admin/users/${u.id}/password`);
+  } catch (e) {
+    const m = modal({
+      title: `Password for ${u.name}`,
+      body: `<p class="small">${esc(e.message)}</p>`,
+      footer: `<button class="btn" data-close>Close</button>${e.code === 'NOT_STORED' ? '<button class="btn primary" id="goSet">Set a new password</button>' : ''}`,
+    });
+    $('#goSet', m.root)?.addEventListener('click', () => { m.close(); setPasswordDialog(u); });
+    return;
+  }
+  const m = modal({
+    title: `Password for ${u.name}`,
+    body: `
+      <div class="card soft stack">
+        <div><div class="label">Username</div><div class="mono bold">${esc(r.username)}</div></div>
+        <div><div class="label">Password</div>
+          <div class="row"><input class="input mono grow" id="pwShow" type="password" value="${esc(r.password)}" readonly aria-label="Password">
+          <button class="btn icon" type="button" id="pwToggle" title="Show password" aria-label="Show password">${ICONS.eye}</button>
+          <button class="btn icon" type="button" id="pwCopy2" title="Copy password" aria-label="Copy password">${ICONS.copy}</button></div>
+        </div>
+      </div>
+      <p class="xs muted">This view is recorded in the audit log. ${esc(roleLabel(u.role))}s cannot change this password; use the key button to set a new one.</p>`,
+    footer: '<button class="btn primary" data-close>Done</button>',
+  });
+  const field = $('#pwShow', m.root);
+  const toggle = $('#pwToggle', m.root);
+  const flip = () => {
+    const show = field.type === 'password';
+    field.type = show ? 'text' : 'password';
+    toggle.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+    toggle.title = show ? 'Hide password' : 'Show password';
+  };
+  toggle.addEventListener('click', flip);
+  flip(); // the admin asked to see it: open it straight away, they can hide it again
+  $('#pwCopy2', m.root).addEventListener('click', () => copyText(r.password));
 }
 
 /** Super admin sets a password for someone else (typed, or generated and shown once). */
@@ -472,12 +515,13 @@ function setPasswordDialog(u) {
     body: `
       <form id="pwSetForm" class="stack" autocomplete="off">
         <p class="small muted">${u.role === 'admin' ? 'They will be asked to choose their own password at next sign-in.' : `${roleLabel(u.role)}s cannot change their own password, so this is the password they will use.`} They are signed out on every device.</p>
-        <div class="field"><label>New password</label><input class="input" name="password" type="text" autocomplete="new-password" minlength="10" placeholder="Leave empty to generate one"><div class="help">At least 10 characters with letters and numbers.</div></div>
+        <div class="field"><label>New password</label>${pwInput('password', { minlength: 10, placeholder: 'Leave empty to generate one' })}<div class="help">At least 10 characters with letters and numbers.${u.role === 'admin' ? '' : ' You can look it up later with the eye button.'}</div></div>
         <div class="error-text" data-error hidden></div>
       </form>`,
     footer: '<button class="btn" data-close>Cancel</button><button class="btn primary" id="pwSetSave">Set password</button>',
   });
   const form = $('#pwSetForm', m.root);
+  wireEyes(m.root);
   const save = $('#pwSetSave', m.root);
   save.addEventListener('click', () => form.requestSubmit());
   formHandler(form, save, async (v) => {
@@ -510,7 +554,7 @@ function userForm(u, buses) {
           <div class="field"><label>Role</label><select class="input" name="role">${ROLE_OPTIONS.map(([k, label]) => `<option value="${k}" ${(u?.role || 'incharge') === k ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
           <div class="field"><label>Bus (bus admins only)</label><select class="input" name="bus_id">${busOptions(buses, u?.bus_id)}</select><div class="help">The bus this admin runs. Ignored for other roles.</div></div>
         </div>
-        ${u ? '' : '<div class="field"><label>Password</label><input class="input" name="password" type="text" autocomplete="new-password" placeholder="Leave empty to generate one"><div class="help">Bus and operations admins keep this password; only you can change it later.</div></div>'}
+        ${u ? '' : `<div class="field"><label>Password</label>${pwInput('password', { placeholder: 'Leave empty to generate one' })}<div class="help">Bus and operations admins keep this password; only you can change it, and you can look it up later on this page.</div></div>`}
         <label class="check"><input type="checkbox" name="active" ${u ? (u.active ? 'checked' : '') : 'checked'}> Active</label>
         <div class="error-text" data-error hidden></div>
       </form>`,
@@ -518,6 +562,7 @@ function userForm(u, buses) {
   });
   const form = $('#userForm', m.root);
   const save = $('#userSave', m.root);
+  wireEyes(m.root);
   save.addEventListener('click', () => form.requestSubmit());
   formHandler(form, save, async (v) => {
     const body = { ...v, bus_id: v.bus_id || null };
