@@ -292,6 +292,20 @@ r = await call(admin, 'GET', '/api/admin/audit');
 ok(r.status === 200 && r.data.items.some((a) => a.action === 'checkin.manual') && r.data.items.some((a) => a.action === 'login.failed'), 'audit log records manual check-in and failed logins');
 r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/end`, {}, csrf);
 ok(r.status === 200, 'end trip 3');
+console.log('\n[demo students]');
+r = await call(inch, 'POST', '/api/admin/demo-students', { perBus: 2 }, icsrf);
+ok(r.status === 403, 'incharge cannot add demo students -> 403', r.status);
+r = await call(admin, 'POST', '/api/admin/demo-students', { perBus: 2 }, csrf);
+ok(r.status === 200 && r.data.inserted === r.data.buses * 2, 'admin adds 2 demo students per bus', JSON.stringify(r.data));
+r = await call(admin, 'POST', '/api/admin/demo-students', { perBus: 2 }, csrf);
+ok(r.status === 200 && r.data.inserted === 0, 'adding demo students again is idempotent');
+r = await call(admin, 'GET', '/api/admin/students?q=DEMO-12-1');
+ok(r.data.items.some((s) => s.uuid === 'DEMO-12-1' && s.bus_number === '12' && s.stop_name), 'demo student DEMO-12-1 is on bus 12 with a stop');
+r = await call(admin, 'DELETE', '/api/admin/demo-students', undefined, csrf);
+ok(r.status === 200 && r.data.removed >= 2, 'remove demo deletes them', JSON.stringify(r.data));
+r = await call(admin, 'GET', '/api/admin/students?q=DEMO-');
+ok(r.data.total === 0, 'no demo students left; real students untouched');
+
 await call(admin, 'DELETE', `/api/admin/users/${testInchargeId}`, undefined, csrf);
 
 console.log('\n[headers]');

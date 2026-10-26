@@ -11,6 +11,7 @@ import { tripSummary, listTrips, activeTrips, endTrip } from '../services/trips.
 import { clientCount } from '../services/events.js';
 import { baseUrl, qrMode, setQrMode } from '../services/qr.js';
 import { seedFleet, FLEET } from '../services/fleet.js';
+import { addDemoStudents, removeDemoStudents } from '../services/demo.js';
 
 const router = Router();
 router.use(requireAuth('admin'));
@@ -235,6 +236,21 @@ router.post('/students/import', async (req, res) => {
   await batchChunks(studentStmts);
   await audit(req, 'student.import', 'student', null, `${summary.inserted} new, ${summary.updated} updated, ${summary.skipped} skipped`);
   res.json(summary);
+});
+
+/** Dummy students (IDs DEMO-<bus>-<n>) for trying the system out; repeatable, removable. */
+router.post('/demo-students', async (req, res) => {
+  const { perBus } = validate(z.object({ perBus: z.coerce.number().int().min(1).max(50).default(6) }), req.body);
+  const r = await addDemoStudents(perBus);
+  if (!r.buses) throw new HttpError(409, 'Create the buses first (Buses & stops → Create 19-bus fleet).');
+  await audit(req, 'student.demo.add', 'student', null, `${r.inserted} demo students added (${r.perBus} per bus, ${r.buses} buses)`);
+  res.json(r);
+});
+
+router.delete('/demo-students', async (req, res) => {
+  const r = await removeDemoStudents();
+  await audit(req, 'student.demo.remove', 'student', null, `${r.removed} demo students removed`);
+  res.json(r);
 });
 
 router.get('/students/export.csv', async (req, res) => {

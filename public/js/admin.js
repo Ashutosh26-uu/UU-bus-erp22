@@ -173,6 +173,8 @@ async function renderStudents() {
         <div class="row wrap">
           <a class="btn" href="/api/admin/students/export.csv">${ICONS.download}<span>Export</span></a>
           <button class="btn" id="importBtn">${ICONS.upload}<span>Import CSV</span></button>
+          <button class="btn ghost" id="demoAdd" title="About 6 dummy students per bus, IDs like DEMO-12-1">Add demo students</button>
+          <button class="btn ghost" id="demoRemove" title="Delete every DEMO- student and their boardings">Remove demo</button>
           <button class="btn primary" id="addStudent">${ICONS.plus}<span>Add student</span></button>
         </div>
       </div>
@@ -183,6 +185,18 @@ async function renderStudents() {
   $('#sbus').addEventListener('change', (e) => { studentsState.bus = e.target.value; studentsState.page = 1; loadStudents(); });
   $('#addStudent').addEventListener('click', () => studentForm());
   $('#importBtn').addEventListener('click', importDialog);
+  $('#demoAdd').addEventListener('click', async () => {
+    if (!(await confirmDialog('Add about 6 dummy students to every bus? Their IDs start with DEMO- (for example DEMO-12-1) so they never clash with real students, and "Remove demo" deletes them again.', { title: 'Add demo students', okText: 'Add' }))) return;
+    try {
+      const r = await api.post('/api/admin/demo-students', { perBus: 6 });
+      toast(r.inserted ? `${r.inserted} demo students added across ${r.buses} buses. Try ID DEMO-1-1 on a bus 1 check-in.` : 'Demo students already exist', 'success', 6000);
+      loadStudents();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('#demoRemove').addEventListener('click', async () => {
+    if (!(await confirmDialog('Delete every demo student (IDs starting with DEMO-) together with their boardings? Real students are not touched.', { title: 'Remove demo students', okText: 'Remove', danger: true }))) return;
+    try { const r = await api.del('/api/admin/demo-students'); toast(`${r.removed} demo students removed`, 'success'); loadStudents(); } catch (e) { toast(e.message, 'error'); }
+  });
   $('#studentsTable').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
