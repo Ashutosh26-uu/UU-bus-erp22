@@ -312,7 +312,7 @@ function importDialog() {
 async function renderBuses() {
   const buses = await busesList(true);
   content.innerHTML = `
-    <div class="row between wrap"><p class="muted small">Each bus has its own stops, its own portal (<code>/bus/&lt;number&gt;</code>) with its own QR, and its own incharge login. Students are assigned to one bus and stop.</p><div class="row"><span class="pill accent">${buses.filter((b) => b.active).length} buses</span><a class="btn" href="/incharge" target="_blank" rel="noopener">All portals ↗</a><button class="btn primary" id="addBus">${ICONS.plus}<span>Add bus</span></button></div></div>
+    <div class="row between wrap"><p class="muted small">Each bus has its own stops, its own portal (<code>/bus/&lt;number&gt;</code>) with its own QR, and its own incharge login. Students are assigned to one bus and stop.</p><div class="row"><span class="pill accent">${buses.filter((b) => b.active).length} buses</span><a class="btn" href="/incharge" target="_blank" rel="noopener">All portals ↗</a><button class="btn" id="seedFleet" title="Adds any missing standard bus, stop and incharge account">Create 19-bus fleet</button><button class="btn primary" id="addBus">${ICONS.plus}<span>Add bus</span></button></div></div>
     <div class="grid auto">${buses.length ? buses.map((b) => `
       <div class="card stack" data-bus="${b.id}">
         <div class="row between">
@@ -325,9 +325,10 @@ async function renderBuses() {
           <div class="row wrap" data-stops>${b.stops.map((s) => `<span class="pill outline">${esc(s.name)} <button class="btn icon sm ghost" data-del-stop="${s.id}" title="Remove stop" aria-label="Remove">${ICONS.x}</button></span>`).join('') || '<span class="xs faint">No stops yet</span>'}</div>
           <form class="row mt" data-add-stop="${b.id}"><input class="input grow" name="name" placeholder="Add a stop…" maxlength="80" required><button class="btn sm" type="submit">${ICONS.plus}</button></form>
         </div>
-      </div>`).join('') : '<div class="card"><div class="empty"><div class="big">🚌</div>No buses yet. Add one, or import students with a bus column.</div></div>'}
+      </div>`).join('') : '<div class="card"><div class="empty"><div class="big">🚌</div>No buses yet. Use <b>Create 19-bus fleet</b>, add one, or import students with a bus column.</div></div>'}
     </div>`;
   $('#addBus').addEventListener('click', () => busForm());
+  $('#seedFleet').addEventListener('click', seedFleetDialog);
   $$('[data-edit-bus]').forEach((b) => b.addEventListener('click', () => busForm(buses.find((x) => x.id === Number(b.dataset.editBus)))));
   $$('[data-del-bus]').forEach((b) => b.addEventListener('click', async () => {
     const bus = buses.find((x) => x.id === Number(b.dataset.delBus));
@@ -342,6 +343,43 @@ async function renderBuses() {
     if (!(await confirmDialog('Remove this stop? Students on it will have no stop until reassigned.', { okText: 'Remove', danger: true }))) return;
     try { await api.del(`/api/admin/stops/${b.dataset.delStop}`); renderBuses(); } catch (e) { toast(e.message, 'error'); }
   }));
+}
+
+async function seedFleetDialog() {
+  const ok = await confirmDialog('Create the standard 19-bus fleet? Missing buses, stops and incharge accounts (incharge1 … incharge19) are added; anything that already exists is left as it is.', { title: 'Create 19-bus fleet', okText: 'Create' });
+  if (!ok) return;
+  const btn = $('#seedFleet');
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+  let r;
+  try { r = await api.post('/api/admin/fleet'); } catch (e) { toast(e.message, 'error'); if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); } return; }
+  busCache = null;
+  await renderBuses();
+  if (!r.incharges.length) {
+    toast(`Fleet complete: ${r.buses} new bus(es), ${r.stops} new stop(s). All incharge accounts already existed.`, 'success', 5000);
+    return;
+  }
+  const origin = location.origin;
+  const rows = r.incharges.map((u) => ({ ...u, portal: `${origin}/bus/${encodeURIComponent(u.bus)}` }));
+  const m = modal({
+    title: 'Incharge accounts created',
+    wide: true,
+    body: `
+      <p class="small"><b>Save these now: the passwords are shown only once.</b> Each incharge must set a new password at first sign-in and then lands on their own bus portal.</p>
+      <p class="xs muted">${r.buses} new bus(es) · ${r.stops} new stop(s) · ${r.incharges.length} new account(s)</p>
+      ${table(['Bus', 'Username', 'Temporary password', 'Portal'], rows.map((u) => `<tr><td><b>Bus ${esc(u.bus)}</b></td><td class="mono">${esc(u.username)}</td><td class="mono bold">${esc(u.password)}</td><td class="xs mono">${esc(u.portal)}</td></tr>`))}`,
+    footer: `<button class="btn" id="fleetCopy">${ICONS.copy}<span>Copy all</span></button><button class="btn" id="fleetCsv">${ICONS.download}<span>Download CSV</span></button><button class="btn primary" data-close>I saved them</button>`,
+  });
+  const text = rows.map((u) => `Bus ${u.bus}\t${u.username}\t${u.password}\t${u.portal}`).join('\n');
+  $('#fleetCopy', m.root).addEventListener('click', () => copyText(text));
+  $('#fleetCsv', m.root).addEventListener('click', () => {
+    const csv = ['bus,username,temporary_password,portal', ...rows.map((u) => [u.bus, u.username, u.password, u.portal].join(','))].join('\r\n') + '\r\n';
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = el(`<a href="${url}" download="incharge-accounts.csv"></a>`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
 }
 
 function busForm(b = null) {

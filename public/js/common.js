@@ -162,8 +162,8 @@ function pollLive(handlers, onStatus) {
   let timer = null;
   let inflight = false;
   let failures = 0;
-  const VISIBLE_MS = 2500;
-  const HIDDEN_MS = 15000;
+  const VISIBLE_MS = Math.max(1500, Number(api.pollMs) || 2500);
+  const HIDDEN_MS = Math.max(15000, VISIBLE_MS * 4);
   const schedule = (ms) => { clearTimeout(timer); if (!stopped) timer = setTimeout(tick, ms); };
   async function tick() {
     if (stopped || inflight) return;
@@ -261,6 +261,7 @@ export async function requireStaff(roles) {
   try { me = await api.get('/api/auth/me'); } catch (e) { if (e.status === 401) return null; throw e; }
   api.csrf = me.csrf;
   api.liveMode = me.live || 'sse';
+  api.pollMs = me.pollMs || 2500;
   if (roles && !roles.includes(me.user.role)) { location.href = '/'; return null; }
   if (me.user.mustChangePassword) await forcePasswordChange();
   return me.user;

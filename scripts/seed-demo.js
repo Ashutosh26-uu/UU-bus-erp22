@@ -27,7 +27,7 @@ for (const b of FLEET) {
     const [course, specs] = COURSES[n % COURSES.length];
     stmts.push([
       'INSERT OR IGNORE INTO students(uuid,name,course,year,specialization,bus_id,stop_id,phone,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)',
-      uuid, name, course, YEARS[n % YEARS.length], specs[n % specs.length], b.id, b.stopIds[n % b.stopIds.length] ?? null,
+      uuid, name, course, YEARS[n % YEARS.length], specs[n % specs.length], created.ids[b.number].id, created.ids[b.number].stopIds[n % created.ids[b.number].stopIds.length] ?? null,
       `98${String(10000000 + n * 7919).slice(0, 8)}`, t, t,
     ]);
   }

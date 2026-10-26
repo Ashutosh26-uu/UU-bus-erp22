@@ -1,0 +1,25 @@
+# Netlify: static files from public/ on the CDN, everything else to one function running the app.
+[build]
+  publish = "public"
+  command = "echo 'No build step: static files are served from public/'"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  # esbuild keeps the function an ES module (the app uses import.meta and dynamic imports)
+  node_bundler = "esbuild"
+  # views are read from disk by the function; keep them in the bundle
+  included_files = ["views/**"]
+
+[functions.server]
+  # optional: on Pro plans pick the region closest to your users and your Turso database, e.g. "sin"
+  # region = "sin"
+
+# Shadowing rules: a request that matches a real file in public/ is served as that file;
+# everything else (pages and /api/*) goes to the function.
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server/:splat"
+  status = 200

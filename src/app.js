@@ -1,5 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
+import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { ready, cleanup, get } from './db.js';
@@ -53,7 +54,11 @@ app.use((req, res, next) => {
 
 // static assets first: no session lookup or body parsing for css/js/icons (on Vercel the CDN serves them)
 const PUBLIC = path.join(config.root, 'public');
-const VIEWS = path.join(config.root, 'views');
+// Serverless packagers place bundled files differently; find the HTML views wherever they landed.
+const VIEWS = [config.root, process.cwd(), process.env.LAMBDA_TASK_ROOT]
+  .filter(Boolean)
+  .map((base) => path.join(base, 'views'))
+  .find((dir) => fs.existsSync(path.join(dir, 'login.html'))) || path.join(config.root, 'views');
 app.use(express.static(PUBLIC, { index: false, maxAge: config.isProd ? '1d' : 0, etag: true }));
 
 // ------------------------------------------------------------------ setup gate

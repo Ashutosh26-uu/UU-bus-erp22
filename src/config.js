@@ -4,15 +4,35 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** Project root. Works as native ESM, and inside serverless bundles where import.meta may be empty. */
+function findRoot() {
+  try {
+    const url = import.meta?.url;
+    if (url) return path.resolve(path.dirname(fileURLToPath(url)), '..');
+  } catch { /* fall through */ }
+  const candidates = [process.env.LAMBDA_TASK_ROOT, process.cwd()].filter(Boolean);
+  return candidates.find((dir) => fs.existsSync(path.join(dir, 'views'))) || candidates[0] || '.';
+}
+export const ROOT = findRoot();
 
 // Load .env if present (Node >= 21.7 has process.loadEnvFile)
 try { process.loadEnvFile(path.join(ROOT, '.env')); } catch { /* no .env, that is fine */ }
 
 const env = process.env;
 
-/** Running as stateless serverless functions (Vercel sets VERCEL=1). No local disk, no long-lived process. */
-const SERVERLESS = !!env.VERCEL || env.SERVERLESS === '1' || env.SERVERLESS === 'true';
+/**
+ * Where we run. 'server' = one long-lived process (npm start). Everything else is stateless
+ * serverless functions: no disk that survives, no shared memory, no background timers.
+ * The Netlify wrapper sets HOSTING_PLATFORM=netlify before loading the app.
+ */
+const PLATFORM = env.HOSTING_PLATFORM
+  || (env.VERCEL ? 'vercel' : env.NETLIFY ? 'netlify' : env.AWS_LAMBDA_FUNCTION_NAME ? 'lambda' : 'server');
+const SERVERLESS = PLATFORM !== 'server' || env.SERVERLESS === '1' || env.SERVERLESS === 'true';
+const ENV_HELP = PLATFORM === 'netlify'
+  ? 'Netlify: Site configuration → Environment variables, then redeploy'
+  : PLATFORM === 'vercel'
+    ? 'Vercel: Settings → Environment Variables, then redeploy'
+    : 'your hosting provider\'s environment variables';
 const DATA_DIR = path.resolve(ROOT, env.DATA_DIR || 'data');
 if (!SERVERLESS) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -22,7 +42,7 @@ const problems = [];
 function loadOrCreateSecret() {
   if (env.SESSION_SECRET && env.SESSION_SECRET.length >= 32) return env.SESSION_SECRET;
   if (SERVERLESS) {
-    problems.push('SESSION_SECRET is missing or shorter than 32 characters. Add a long random value in the Vercel project environment variables.');
+    problems.push(`SESSION_SECRET is missing or shorter than 32 characters. Add a long random value (${ENV_HELP}).`);
     return 'unconfigured-' + crypto.randomBytes(24).toString('base64url');
   }
   const file = path.join(DATA_DIR, 'secret.key');
@@ -59,9 +79,15 @@ function parseTrustProxy(v) {
 
 const PORT = Number(env.PORT) || 3000;
 const BASE_URL = (env.BASE_URL || '').trim().replace(/\/+$/, '');
-const DB_URL = (env.TURSO_DATABASE_URL || env.LIBSQL_URL || '').trim();
-if (SERVERLESS && !DB_URL) problems.push('TURSO_DATABASE_URL is not set. Connect a Turso database to the Vercel project (Storage tab or Marketplace) or add the variable by hand.');
-if (env.VERCEL && DB_URL.startsWith('file:')) problems.push('TURSO_DATABASE_URL points to a local file; serverless functions need a hosted database (libsql:// or https:// URL).');
+// Turso connection. Integrations name the variables differently, so accept the common spellings,
+// and as a last resort any TURSO_* variable holding a libsql:// / https:// URL or a token.
+const turso = Object.entries(env).filter(([k]) => /TURSO/i.test(k));
+const DB_URL = (env.TURSO_DATABASE_URL || env.LIBSQL_URL || env.TURSO_DB_URL || env.TURSO_URL
+  || turso.find(([, v]) => /^(libsql|https?):\/\//i.test(String(v).trim()))?.[1] || '').trim();
+const DB_TOKEN = (env.TURSO_AUTH_TOKEN || env.LIBSQL_AUTH_TOKEN || env.TURSO_DB_AUTH_TOKEN || env.TURSO_TOKEN
+  || turso.find(([k]) => /TOKEN/i.test(k))?.[1] || '').trim();
+if (SERVERLESS && !DB_URL) problems.push(`TURSO_DATABASE_URL is not set. Create a Turso database and add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN (${ENV_HELP}).`);
+if (PLATFORM === 'vercel' && DB_URL.startsWith('file:')) problems.push('TURSO_DATABASE_URL points to a local file; serverless functions need a hosted database (libsql:// or https:// URL).');
 
 const sessionSecret = loadOrCreateSecret();
 
@@ -70,8 +96,11 @@ export const config = Object.freeze({
   dataDir: DATA_DIR,
   dbPath: path.join(DATA_DIR, 'bus-erp.sqlite'),
   dbUrl: DB_URL,
-  dbAuthToken: (env.TURSO_AUTH_TOKEN || env.LIBSQL_AUTH_TOKEN || '').trim(),
+  dbAuthToken: DB_TOKEN,
+  platform: PLATFORM,
   serverless: SERVERLESS,
+  /** How often screens poll for live events in 'poll' mode (each poll is one function call). */
+  pollMs: Math.round(Math.min(30, Math.max(1.5, Number(env.POLL_SECONDS) || 2.5)) * 1000),
   /** 'sse' pushes events over one long connection (single server); 'poll' stores events in the DB (serverless). */
   liveMode: env.LIVE_MODE === 'poll' || env.LIVE_MODE === 'sse' ? env.LIVE_MODE : SERVERLESS ? 'poll' : 'sse',
   /** 'db' keeps login/scan throttles in the database so every serverless instance shares them. */

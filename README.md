@@ -141,7 +141,8 @@ Copy `.env.example` to `.env`. Everything is optional.
 | `ADMIN_PASSWORD` | unset | password for the first `admin` account (on Vercel the only way to create it without seeding) |
 | `LIVE_MODE` | `sse` locally, `poll` on Vercel | how screens get live updates |
 | `RATE_LIMIT_STORE` | `memory` locally, `db` on Vercel | where login / scan throttles are counted |
-| `SERVERLESS` | auto (`VERCEL` is set) | force serverless behaviour, e.g. for `npm run serve:function` |
+| `SERVERLESS` | auto on Vercel / Netlify / AWS Lambda | force serverless behaviour, e.g. for `npm run serve:function` |
+| `POLL_SECONDS` | `2.5` | how often screens poll for live updates in serverless mode (1.5–30); higher = fewer function calls |
 
 ---
 
@@ -190,7 +191,8 @@ the seed (Git Bash / macOS / Linux syntax), which then creates the 19 buses, the
 `admin` and `incharge1` … `incharge19` directly in Turso.
 The passwords are printed and saved to `data/turso-initial-admin.txt` and
 `data/turso-incharge-accounts.txt` (separate from your local files). Instead of seeding you can
-set `ADMIN_PASSWORD` on Vercel: the first request then creates `admin` with that password.
+set `ADMIN_PASSWORD` on Vercel: the first request then creates `admin` with that password, and
+**Admin → Buses & stops → Create 19-bus fleet** creates the buses and incharge accounts.
 
 **4. Use it**
 
@@ -214,6 +216,68 @@ Good to know:
 **Try serverless mode locally first** (optional): with the Turso variables in `.env`,
 `SERVERLESS=1 npm run serve:function` runs the exact Vercel function on
 <http://localhost:3001>.
+
+## Deploy on Netlify
+
+Same idea as Vercel: `netlify/functions/server.js` runs the whole app as one function
+(through `serverless-http`), `public/` is served from Netlify's CDN, `netlify.toml` routes every
+other request to the function, and the data lives in **Turso**. Live updates use polling and
+throttles are shared through the database, exactly as on Vercel.
+
+**1. Create a Turso database**
+
+Sign up at <https://turso.tech> (GitHub sign-in works), create a database and create a
+database token. Put the database **next to the functions**: on Netlify's free plan functions run
+in US East (Ohio), so choose a US East location. On a paid plan you can move the functions to
+Singapore (`region = "sin"` in `netlify.toml`, or Site configuration → Functions → Region) and
+use the Turso location closest to it. Netlify has no Mumbai region. Alternatively install
+Netlify's **Turso extension** (team → Extensions); the app also accepts the variable names it
+injects.
+
+**2. Create the site**
+
+<https://app.netlify.com/start> → Import from Git → GitHub → `Ashutosh26-uu/UU-bus-erp22`.
+Build settings come from `netlify.toml` (no build step). Before deploying, add these environment
+variables (Site configuration → Environment variables):
+
+| Variable | Value |
+| --- | --- |
+| `SESSION_SECRET` | long random value: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
+| `TURSO_DATABASE_URL` | `libsql://<database>-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | the database token |
+| `ADMIN_PASSWORD` | password for the first `admin` login (changed at first sign-in; you can delete the variable afterwards) |
+| `POLL_SECONDS` | `5` recommended on the free plan (see below) |
+
+Deploy (or redeploy after changing variables). Until the database variables exist, every page
+shows a short "Finish the server setup" checklist.
+
+**3. Create the 19 buses and accounts**
+
+Sign in as `admin`, set a new password, open **Admin → Buses & stops → Create 19-bus fleet**.
+It creates the buses, their stops and `incharge1` … `incharge19`, and shows the temporary
+passwords **once** with Copy and Download CSV buttons. Then import the students
+(Admin → Students → Import CSV). The same button works on Vercel and on a local server.
+
+Command-line alternative (Netlify CLI):
+
+```bash
+npx netlify-cli login
+npx netlify-cli sites:create --name your-site-name
+npx netlify-cli env:set SESSION_SECRET "<long random value>" --secret
+npx netlify-cli deploy --build --prod
+```
+
+Good to know:
+
+* **Free plan cap.** Netlify's free plan has a fixed monthly credit allowance; when it runs out,
+  the team's sites are **paused** until the next cycle. Every poll and every page or API request
+  counts. With `POLL_SECONDS=5`, 19 bus screens boarding about an hour a day plus an admin
+  dashboard come to roughly half a million function calls a month. Check
+  <https://www.netlify.com/pricing/> and use a paid plan for the college's official system.
+* **Limits.** Requests and responses are capped at 6 MB (CSV imports up to ~4 MB), and functions
+  time out after 60 seconds; the app needs far less.
+* **Testing the package locally:** `npx netlify-cli build` creates `.netlify/functions/server.zip`,
+  the exact bundle Netlify uploads.
 
 ## Other hosting
 
@@ -259,6 +323,8 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 ```
 api/index.js         Vercel serverless entry (exports the Express app)
 vercel.json          Vercel config: static output, function settings, Mumbai region, rewrites
+netlify/functions/   Netlify Functions entry (Express app through serverless-http)
+netlify.toml         Netlify config: publish public/, bundle views, route the rest to the function
 src/
   app.js             Express app: security headers, setup gate, routes, error handling
   server.js          long-running server for `npm start` (listen, timers, graceful shutdown)

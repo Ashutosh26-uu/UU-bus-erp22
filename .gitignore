@@ -6,3 +6,4 @@ data/
 .vercel
 .env*
 !.env.example
+.netlify

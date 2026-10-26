@@ -1,6 +1,7 @@
-import { rateLimit } from 'express-rate-limit';
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
 import { config } from '../config.js';
 import { get, run } from '../db.js';
+import { clientIp } from '../http.js';
 
 /**
  * Counters in the database, so every serverless instance shares them (memory counters would reset
@@ -45,6 +46,8 @@ const make = (name, windowMs, limit, message, shared = true) =>
     limit,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
+    // same real-IP logic as the audit log; IPv6 clients are grouped by /56 so they cannot rotate addresses
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req) || 'unknown'),
     ...(shared && config.rateLimitStore === 'db' ? { store: new DbStore(name) } : {}),
     handler: (req, res) => res.status(429).json({ error: message, code: 'RATE_LIMITED' }),
   });

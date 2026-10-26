@@ -38,7 +38,14 @@ export function clearCookie(res, name, path = '/') {
   res.append('Set-Cookie', `${name}=; Path=${path}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; HttpOnly${secure}`);
 }
 
-export const clientIp = (req) => (req.ip || req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+/**
+ * The caller's real IP. On Netlify the forwarded-for header can carry client-supplied values, so use
+ * Netlify's own connection header there (only there: elsewhere a client could set it).
+ */
+export const clientIp = (req) => {
+  const nf = config.platform === 'netlify' ? req.get('x-nf-client-connection-ip') : null;
+  return (nf || req.ip || req.socket?.remoteAddress || '').trim().replace(/^::ffff:/, '');
+};
 export const userAgent = (req) => String(req.headers['user-agent'] || '').slice(0, 300);
 
 /** Validate a zod schema; throws 400 with the first readable issue. */

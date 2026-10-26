@@ -45,11 +45,11 @@ router.post('/login', loginLimiter, async (req, res) => {
   );
   setCookie(res, SESSION_COOKIE, sid, { maxAgeMs: config.sessionTtlMs, sameSite: 'Lax' });
   await audit(req, 'login', 'user', user.id, '', { id: user.id, name: user.name });
-  res.json({ user: publicUser(user), csrf, live: config.liveMode });
+  res.json({ user: publicUser(user), csrf, live: config.liveMode, pollMs: config.pollMs });
 });
 
 router.get('/me', requireAuthPendingOk(), (req, res) => {
-  res.json({ user: req.user, csrf: req.session.csrf, live: config.liveMode });
+  res.json({ user: req.user, csrf: req.session.csrf, live: config.liveMode, pollMs: config.pollMs });
 });
 
 router.post('/logout', requireAuthPendingOk(), async (req, res) => {

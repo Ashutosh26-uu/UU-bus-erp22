@@ -10,6 +10,7 @@ import { parseCsv, toCsv, mapHeaders } from '../services/csv.js';
 import { tripSummary, listTrips, activeTrips, endTrip } from '../services/trips.js';
 import { clientCount } from '../services/events.js';
 import { baseUrl } from '../services/qr.js';
+import { seedFleet, FLEET } from '../services/fleet.js';
 
 const router = Router();
 router.use(requireAuth('admin'));
@@ -259,6 +260,18 @@ router.get('/buses', async (req, res) => {
     all("SELECT id, name, username, bus_id FROM users WHERE role = 'incharge' AND active = 1 ORDER BY name"),
   ]);
   res.json({ buses: buses.map((b) => ({ ...b, stops: stops.filter((s) => s.bus_id === b.id), incharges: incharges.filter((u) => u.bus_id === b.id) })) });
+});
+
+/**
+ * Create the standard 19-bus fleet (buses, stops, one incharge per bus) on the server, so hosted
+ * deployments need no local scripts. Only missing pieces are added. New incharge passwords are
+ * returned once and never stored in plain text.
+ */
+router.post('/fleet', async (req, res) => {
+  const created = await seedFleet();
+  await audit(req, 'fleet.seed', 'bus', null, `${created.buses} buses, ${created.stops} stops, ${created.incharges.length} incharge accounts created`);
+  res.set('Cache-Control', 'no-store');
+  res.json({ fleetSize: FLEET.length, buses: created.buses, stops: created.stops, incharges: created.incharges });
 });
 
 const busSchema = z.object({ number: str(20, 1), name: str(60, 1), route: str(200).default(''), active: z.boolean().optional().default(true) });
