@@ -55,10 +55,10 @@ Useful scripts:
 
 | What | Where | Who can open it |
 | --- | --- | --- |
-| Bus N portal (QR screen, live count, manual check-in, end trip) | `/bus/N` | the incharge assigned to bus N, or an admin |
-| Portal picker (all 19 buses with live status) | `/incharge` | admins and incharges with no assigned bus |
+| Bus N portal (QR, live count, student roster, manual check-in, end trip) | `/bus/N` | the bus admin of bus N or the super admin; operations admins can watch it (no QR, no actions) |
+| Portal picker (all 19 buses with live status) | `/incharge` | super and operations admins, bus admins with no assigned bus |
 | Bus N student link (what the QR encodes) | `/checkin/N?t=<rotating token>` | any phone that scanned bus N's live QR |
-| Admin console | `/admin` | admins |
+| Transport console | `/admin` | super admin (everything), operations admin (read-only) |
 
 * An incharge signs in and is taken straight to their own portal. Opening another bus's
   portal bounces them back to theirs; the API refuses it too (`WRONG_BUS_PORTAL`).
@@ -109,7 +109,7 @@ Useful scripts:
 | Screenshot / forwarded QR | **Rotating mode:** token changes every 20 s and is accepted for at most 40 s; only the live screen works. **Whole-day mode:** a photo of the QR works until midnight, so an absent student *can* check in if someone forwards it. The incharge sees every name live and can press **New QR code** to cancel a leaked QR; switch to rotating mode for the strongest protection. Tampered, old-day or future tokens are rejected in both modes. |
 | Friend scans and types your ID | **One phone, one student.** The phone is identified by a signed HttpOnly cookie mirrored in localStorage; the first student who boards with a phone owns it. Another student on that phone is refused. A phone can board only one student per trip. |
 | Student uses many phones | Max 2 phones per student per 30 days; after that admin must reset devices (Students → history). First boarding from a new phone is flagged **new_device**. |
-| Boarding the wrong bus | Allowed (students do switch buses) but flagged **wrong_bus**; the incharge sees it live. |
+| Boarding the wrong bus | Refused: the ID and name must belong to a student registered on that bus, otherwise the student sees **Invalid**. Manual check-ins and the bus admin's student search are limited to the bus's own students too. |
 | Guessing IDs | Name **and** ID must match; the error never says which was wrong. 6 attempts per scan, then a fresh scan is needed. Generous per-network rate limits (campus NAT friendly). |
 | Double check-in | Database unique constraint per (trip, student) and per (trip, phone). |
 | Staff account attacks | scrypt password hashing, constant-time checks, 5-strike 15-minute lockout, temporary passwords that must be changed, session ids stored hashed, sessions expire after 12 h idle / 7 days max. |
@@ -313,12 +313,17 @@ UU2023CS0142,Aditi Sharma,B.Tech,2nd,CSE (AI & ML),12,Rajpur Road,9876543210
 
 ## Roles
 
-* **Admin** – dashboard, students, buses & stops, staff accounts, trips, flags, audit log,
-  settings, device resets. Can open any of the 19 bus portals.
-* **Bus incharge** – one account per bus; signs in straight into their own bus portal, starts
-  and ends that bus's trips, sees the live list, can mark a student manually with a reason.
-  Cannot open another bus's portal.
-* **Student** – no account, no app, no login. Scan, confirm, done.
+* **Super admin** (role `admin`): everything: students, buses and stops, staff accounts and
+  every password, trips, flags, audit log, settings, device resets. Can run any bus portal.
+* **Operations admin** (role `operator`): sits between the super admin and the bus admins.
+  Sees the dashboard, students, buses, trips and flags, and can watch any bus live, but cannot
+  change anything (no trips, no check-ins, no QR, no edits, not even their own password).
+* **Bus admin** (role `incharge`, one per bus): signs in straight into their own bus portal,
+  starts and ends that bus's trips, shows the QR, sees every student of the bus with who has
+  verified, and can mark a student manually. Cannot open another bus, and **cannot change their
+  own password**: only the super admin sets it (Staff → key button).
+* **Student**: no account, no app, no login. Scan, enter name and student ID, check the details,
+  tap Verify. Only students registered on that bus are accepted; anyone else sees "Invalid".
 
 ---
 

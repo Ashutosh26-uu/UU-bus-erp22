@@ -13,7 +13,7 @@ let seq = 0;
 
 export const tripScope = (trip) => ({ bus_id: trip.bus_id, incharge_id: trip.incharge_id });
 const visible = (user, scope) =>
-  !scope || user.role === 'admin' || user.id === scope.incharge_id || (user.bus_id != null && user.bus_id === scope.bus_id);
+  !scope || user.role === 'admin' || user.role === 'operator' || user.id === scope.incharge_id || (user.bus_id != null && user.bus_id === scope.bus_id);
 
 export function subscribe(req, res, user) {
   res.writeHead(200, {
@@ -55,7 +55,7 @@ export async function pollEvents(user, after) {
   const maxId = (await get('SELECT COALESCE(MAX(id), 0) AS id FROM events')).id;
   if (!after || after >= maxId) return { events: [], cursor: maxId };
   const LIMIT = 200;
-  const rows = user.role === 'admin'
+  const rows = user.role === 'admin' || user.role === 'operator'
     ? await all('SELECT id, type, payload FROM events WHERE id > ? AND id <= ? ORDER BY id LIMIT ?', after, maxId, LIMIT)
     : await all(
       `SELECT id, type, payload FROM events

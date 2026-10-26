@@ -3,26 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Bus screen · UU Bus ERP</title>
+  <title>Bus portal · United University</title>
   <meta name="robots" content="noindex">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#0f4c87">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="/img/uu-crest.png" type="image/png">
+  <script src="/js/boot.js"></script>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
+  <div class="splash" id="splash" role="presentation"><img src="/img/uu-logo.png" alt="United University, Prayagraj" width="320" height="98"><div class="tag">Bus Boarding</div><div class="bar"><i></i></div></div>
   <main class="incharge" id="app">
     <header class="row between wrap hide-kiosk">
       <div class="row wrap">
-        <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">BUS PORTAL</span></div></div>
+        <div class="brand"><img class="logo" src="/img/uu-logo.png" alt="United University, Prayagraj" width="130" height="40"></div>
         <span class="pill accent hidden" id="busBadge"></span>
       </div>
       <div class="row wrap">
         <a class="btn sm ghost hidden" id="allBuses" href="/incharge">All buses</a>
         <span class="pill offline" id="liveBadge">Connecting</span>
         <span class="small muted" id="userName"></span>
-        <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme"></button>
-        <button class="btn sm ghost" id="pwBtn">Password</button>
+        <button class="btn icon ghost" id="themeBtn" aria-label="Switch light or dark"></button>
+        <button class="btn sm ghost hidden" id="pwBtn">Password</button>
         <button class="btn sm ghost" id="logoutBtn"></button>
       </div>
     </header>

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { all, get, run, batch, batchChunks, now, getSetting, setSetting, dbKind } from '../db.js';
 import { config, lanIp } from '../config.js';
 import { HttpError, validate, intParam } from '../http.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, operatorReadOnly } from '../middleware/auth.js';
 import { hashPassword, generatePassword, passwordProblem, normUuid } from '../security.js';
 import { audit } from '../services/audit.js';
 import { parseCsv, toCsv, mapHeaders } from '../services/csv.js';
@@ -14,7 +14,11 @@ import { seedFleet, FLEET } from '../services/fleet.js';
 import { addDemoStudents, removeDemoStudents } from '../services/demo.js';
 
 const router = Router();
-router.use(requireAuth('admin'));
+router.use(requireAuth('admin', 'operator'));
+// Operations admins only watch: dashboard, students, buses, trips and flags, read-only.
+router.use(operatorReadOnly([
+  /^\/dashboard$/, /^\/students$/, /^\/students\/\d+\/history$/, /^\/buses$/, /^\/trips$/, /^\/trips\/\d+$/, /^\/flags$/,
+]));
 
 // ------------------------------------------------------------------ helpers
 const idOrNull = z.preprocess((v) => (v === '' || v == null ? null : Number(v)), z.number().int().positive().nullable());
@@ -367,7 +371,7 @@ router.delete('/stops/:id', async (req, res) => {
 const userSchema = z.object({
   username: z.string().trim().min(3).max(32).regex(/^[a-z0-9._-]+$/i, 'Only letters, numbers, dot, dash, underscore'),
   name: str(80, 2),
-  role: z.enum(['admin', 'incharge']),
+  role: z.enum(['admin', 'operator', 'incharge']),
   bus_id: idOrNull.optional().default(null),
   active: z.boolean().optional().default(true),
   password: z.string().max(128).optional(),
@@ -378,7 +382,7 @@ router.get('/users', async (req, res) => {
     items: await all(
       `SELECT u.id, u.username, u.name, u.role, u.bus_id, u.active, u.must_change_password, u.locked_until, u.created_at, b.number AS bus_number,
               (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id = u.id) AS last_seen
-         FROM users u LEFT JOIN buses b ON b.id = u.bus_id ORDER BY u.role, CAST(b.number AS INTEGER), b.number, u.name COLLATE NOCASE`,
+         FROM users u LEFT JOIN buses b ON b.id = u.bus_id ORDER BY CASE u.role WHEN 'admin' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END, CAST(b.number AS INTEGER), b.number, u.name COLLATE NOCASE`,
     ),
   });
 });
@@ -392,8 +396,9 @@ router.post('/users', async (req, res) => {
   if (problem) throw new HttpError(400, problem);
   const t = now();
   const id = (await run(
-    'INSERT INTO users(username,name,role,password_hash,bus_id,active,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)',
-    d.username, d.name, d.role, hashPassword(password), d.role === 'admin' ? null : d.bus_id, d.active, t, t,
+    'INSERT INTO users(username,name,role,password_hash,bus_id,active,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+    // only super admins pick their own password later; bus and operations admins keep the one set here
+    d.username, d.name, d.role, hashPassword(password), d.role === 'incharge' ? d.bus_id : null, d.active, d.role === 'admin', t, t,
   )).lastInsertRowid;
   await audit(req, 'user.create', 'user', id, `${d.username} (${d.role})`);
   res.status(201).json({ id, password });
@@ -407,21 +412,32 @@ router.put('/users/:id', async (req, res) => {
   if (await get('SELECT id FROM users WHERE username = ? AND id <> ?', d.username, id)) throw new HttpError(409, 'Username already taken');
   if (id === req.user.id && (d.role !== 'admin' || !d.active)) throw new HttpError(400, 'You cannot demote or deactivate yourself');
   if (d.bus_id != null && !(await get('SELECT id FROM buses WHERE id = ?', d.bus_id))) throw new HttpError(400, 'Bus not found');
-  await run('UPDATE users SET username=?, name=?, role=?, bus_id=?, active=?, updated_at=? WHERE id = ?', d.username, d.name, d.role, d.role === 'admin' ? null : d.bus_id, d.active, now(), id);
+  await run('UPDATE users SET username=?, name=?, role=?, bus_id=?, active=?, updated_at=? WHERE id = ?', d.username, d.name, d.role, d.role === 'incharge' ? d.bus_id : null, d.active, now(), id);
+  if (d.role !== 'admin') await run('UPDATE users SET must_change_password = 0 WHERE id = ?', id);
   if (!d.active) await run('DELETE FROM sessions WHERE user_id = ?', id);
   await audit(req, 'user.update', 'user', id, `${d.username} (${d.role})${d.active ? '' : ' deactivated'}`);
   res.json({ ok: true });
 });
 
-router.post('/users/:id/reset-password', async (req, res) => {
+/**
+ * Super admin sets (or generates) another account's password. Bus and operations admins cannot
+ * change their own, so this is the only way theirs changes. Signs the account out everywhere.
+ */
+router.post('/users/:id/password', async (req, res) => {
   const id = intParam(req.params.id);
+  if (id === req.user.id) throw new HttpError(400, 'Use "Password" in the sidebar to change your own password');
   const u = await get('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw new HttpError(404, 'User not found');
-  const password = generatePassword(12);
-  await run('UPDATE users SET password_hash = ?, must_change_password = 1, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?', hashPassword(password), now(), id);
-  await run('DELETE FROM sessions WHERE user_id = ?', id);
-  await audit(req, 'user.password.reset', 'user', id, u.username);
-  res.json({ password });
+  const { password: chosen } = validate(z.object({ password: z.string().max(128).optional().default('') }), req.body);
+  const password = chosen || generatePassword(12);
+  const problem = passwordProblem(password);
+  if (problem) throw new HttpError(400, problem);
+  await batch([
+    ['UPDATE users SET password_hash = ?, must_change_password = ?, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?', hashPassword(password), u.role === 'admin', now(), id],
+    ['DELETE FROM sessions WHERE user_id = ?', id],
+  ]);
+  await audit(req, 'user.password.set', 'user', id, `${u.username}${chosen ? ' (chosen by super admin)' : ' (generated)'}`);
+  res.json({ password: chosen ? null : password, generated: !chosen });
 });
 
 router.delete('/users/:id', async (req, res) => {

@@ -61,8 +61,8 @@ export async function seedFleet() {
       const password = generatePassword(12);
       stmts.push([
         `INSERT OR IGNORE INTO users(username, name, role, password_hash, bus_id, active, must_change_password, created_at, updated_at)
-         SELECT ?, ?, 'incharge', ?, id, 1, 1, ?, ? FROM buses WHERE number = ?`,
-        username, `Incharge Bus ${b.number}`, hashPassword(password), t, t, b.number,
+         SELECT ?, ?, 'incharge', ?, id, 1, 0, ?, ? FROM buses WHERE number = ?`,
+        username, `Bus ${b.number} Admin`, hashPassword(password), t, t, b.number,
       ]);
       created.incharges.push({ username, password, bus: b.number });
     }

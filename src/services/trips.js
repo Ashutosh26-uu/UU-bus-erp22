@@ -95,6 +95,9 @@ export async function endTrip(id, byUserId) {
   return trip;
 }
 
-/** Can this user manage/see this trip? */
+/**
+ * Can this user see this trip? Operations admins see every trip; their write attempts are refused
+ * earlier by the read-only guard on the routes.
+ */
 export const canAccessTrip = (user, trip) =>
-  user.role === 'admin' || trip.incharge_id === user.id || (user.bus_id != null && user.bus_id === trip.bus_id);
+  user.role === 'admin' || user.role === 'operator' || trip.incharge_id === user.id || (user.bus_id != null && user.bus_id === trip.bus_id);

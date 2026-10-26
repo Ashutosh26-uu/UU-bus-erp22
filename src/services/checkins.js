@@ -57,6 +57,7 @@ export async function confirmCheckin({ sessionId, trip, student, deviceId, ip, u
   if (existing) throw new HttpError(409, 'You have already boarded this trip.', { code: 'ALREADY', at: existing.created_at });
   if (devUsed) throw new HttpError(403, 'This phone was already used to board this trip. One phone, one student.', { code: 'DEVICE_USED' });
   if (dev?.student_id && dev.student_id !== student.id) throw deviceBound();
+  if (student.bus_id !== trip.bus_id) throw notOnBus(trip);
 
   const flags = [];
   if (!dev?.student_id) {
@@ -67,7 +68,6 @@ export async function confirmCheckin({ sessionId, trip, student, deviceId, ip, u
     }
     if (others > 0) flags.push('new_device');
   }
-  if (student.bus_id !== trip.bus_id) flags.push('wrong_bus');
 
   let results;
   try {
@@ -81,8 +81,9 @@ export async function confirmCheckin({ sessionId, trip, student, deviceId, ip, u
       [`INSERT INTO checkins(trip_id, student_id, device_id, ip, method, flags, created_at)
         SELECT ?, ?, ?, ?, 'qr', ?, ?
          WHERE (SELECT status FROM trips WHERE id = ?) = 'active'
-           AND (SELECT student_id FROM devices WHERE id = ?) = ?`,
-      trip.id, student.id, deviceId, ip, flags.join(','), ts, trip.id, deviceId, student.id],
+           AND (SELECT student_id FROM devices WHERE id = ?) = ?
+           AND (SELECT bus_id FROM students WHERE id = ?) = (SELECT bus_id FROM trips WHERE id = ?)`,
+      trip.id, student.id, deviceId, ip, flags.join(','), ts, trip.id, deviceId, student.id, student.id, trip.id],
       ['UPDATE checkin_sessions SET consumed_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM checkins WHERE trip_id = ? AND student_id = ?)', ts, sessionId, trip.id, student.id],
     ]);
   } catch (e) { rethrowUnique(e); }
@@ -91,12 +92,17 @@ export async function confirmCheckin({ sessionId, trip, student, deviceId, ip, u
     const [t2, d2] = await Promise.all([get('SELECT status FROM trips WHERE id = ?', trip.id), get('SELECT student_id FROM devices WHERE id = ?', deviceId)]);
     if (t2?.status !== 'active') throw new HttpError(410, 'This trip has ended. Ask the bus incharge.', { code: 'TRIP_ENDED' });
     if (d2?.student_id !== student.id) throw deviceBound();
+    const s2 = await get('SELECT bus_id FROM students WHERE id = ?', student.id);
+    if (s2?.bus_id !== trip.bus_id) throw notOnBus(trip);
     throw new HttpError(409, 'Could not record the boarding. Scan the QR again.', { code: 'RETRY' });
   }
   const result = { id: results[1].lastInsertRowid, flags, at: ts };
   await emitCheckin(result.id);
   return result;
 }
+
+const notOnBus = (trip) =>
+  new HttpError(403, `Invalid. You are not registered on Bus ${trip.bus_number}.`, { code: 'NOT_ON_BUS' });
 
 const deviceBound = () =>
   new HttpError(403, 'This phone is linked to a different student. Use your own phone, or ask the incharge to mark you manually.', { code: 'DEVICE_BOUND' });
@@ -106,8 +112,8 @@ export async function manualCheckin({ trip, student, byUser, note = '' }) {
   const ts = now();
   const existing = await get('SELECT created_at FROM checkins WHERE trip_id = ? AND student_id = ?', trip.id, student.id);
   if (existing) throw new HttpError(409, `${student.name} already boarded this trip`, { at: existing.created_at });
+  if (student.bus_id !== trip.bus_id) throw notOnBus(trip);
   const flags = ['manual'];
-  if (student.bus_id !== trip.bus_id) flags.push('wrong_bus');
   let r;
   try {
     r = await run(

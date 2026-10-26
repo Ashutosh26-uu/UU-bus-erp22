@@ -103,11 +103,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/incharge', inchargeRoutes);
 app.use('/api/checkin', checkinRoutes);
-app.get('/api/events', requireAuth('admin', 'incharge'), (req, res) => {
+app.get('/api/events', requireAuth('admin', 'operator', 'incharge'), (req, res) => {
   if (config.liveMode !== 'sse') throw new HttpError(409, 'Live updates use polling on this server', { code: 'USE_POLL' });
   subscribe(req, res, req.user);
 });
-app.get('/api/events/poll', requireAuth('admin', 'incharge'), async (req, res) => {
+app.get('/api/events/poll', requireAuth('admin', 'operator', 'incharge'), async (req, res) => {
   const raw = req.query.after ?? '0';
   const after = raw === '0' || raw === '' ? 0 : intParam(raw, 'cursor');
   res.json(await pollEvents(req.user, after));
@@ -130,17 +130,17 @@ app.get('/', (req, res) => {
   res.redirect(req.user.home);
 });
 app.get('/login', (req, res, next) => (req.user ? res.redirect('/') : next()), page('login.html'));
-app.get('/admin', requirePage('admin'), page('admin.html'));
+app.get('/admin', requirePage('admin', 'operator'), page('admin.html'));
 // Portal picker (admins, unassigned incharges). An incharge with a bus goes straight to their own portal.
-app.get('/incharge', requirePage('incharge', 'admin'), (req, res, next) => {
+app.get('/incharge', requirePage('incharge', 'admin', 'operator'), (req, res, next) => {
   if (req.user.role === 'incharge' && req.user.bus_number) return res.redirect(req.user.home);
   next();
 }, page('incharge.html'));
 // One portal per bus: /bus/12 is Bus 12's screen. Only its incharge (or an admin) may open it.
-app.get('/bus/:number', requirePage('incharge', 'admin'), async (req, res, next) => {
+app.get('/bus/:number', requirePage('incharge', 'admin', 'operator'), async (req, res, next) => {
   const bus = await get('SELECT id, number FROM buses WHERE number = ? AND active = 1', String(req.params.number).slice(0, 20));
   if (!bus) { res.status(404); return page('404.html')(req, res); }
-  if (req.user.role !== 'admin' && req.user.bus_id != null && req.user.bus_id !== bus.id) return res.redirect(req.user.home);
+  if (req.user.role === 'incharge' && req.user.bus_id != null && req.user.bus_id !== bus.id) return res.redirect(req.user.home);
   next();
 }, page('incharge.html'));
 app.get('/checkin', page('checkin.html'));

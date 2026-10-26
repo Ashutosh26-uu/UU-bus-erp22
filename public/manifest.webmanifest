@@ -1,9 +1,9 @@
 {
-  "name": "UU Bus ERP",
-  "short_name": "Bus ERP",
+  "name": "United University Bus Boarding",
+  "short_name": "UU Bus",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0f1e",
-  "theme_color": "#4f46e5",
-  "icons": [{ "src": "/icons/logo.svg", "sizes": "any", "type": "image/svg+xml" }]
+  "background_color": "#ffffff",
+  "theme_color": "#0f4c87",
+  "icons": [{ "src": "/img/uu-crest.png", "sizes": "88x88", "type": "image/png" }]
 }

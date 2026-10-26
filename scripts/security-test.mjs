@@ -65,7 +65,7 @@ const S = { aditi: [on12[0].uuid, on12[0].name], rahul: [on12[1].uuid, on12[1].n
 const ids = { aditi: on12[0].id, rahul: on12[1].id, priya: on12[2].id, arjun: on12[3].id, tanvi: onOther[0].id };
 for (const id of Object.values(ids)) await call(admin, 'POST', `/api/admin/students/${id}/devices/reset`, {}, csrf);
 const users = (await call(admin, 'GET', '/api/admin/users')).data.items;
-for (const u of users.filter((x) => ['locktest', 'testincharge12', 'testinchargex'].includes(x.username))) await call(admin, 'DELETE', `/api/admin/users/${u.id}`, undefined, csrf);
+for (const u of users.filter((x) => ['locktest', 'testincharge12', 'testinchargex', 'testoperator'].includes(x.username))) await call(admin, 'DELETE', `/api/admin/users/${u.id}`, undefined, csrf);
 
 console.log('\n[fleet]');
 ok(allBuses.length >= 19, `fleet has 19 buses (found ${allBuses.length})`);
@@ -92,17 +92,27 @@ r = await call(admin, 'POST', '/api/admin/buses', { number: 'X', name: 'x' }, { 
 ok(r.status === 403 && r.data.code === 'ORIGIN', 'cross-origin POST -> 403', r.status);
 r = await call(admin, 'POST', '/api/auth/login', { username: 'admin', password: "x' OR 1=1 --" });
 ok(r.status === 401, 'injection-style password rejected');
-// a throw-away incharge for bus 12 (temporary password must be changed before the portal works)
+// a throw-away bus admin for bus 12 (bus admins keep the password the super admin gives them)
 r = await call(admin, 'POST', '/api/admin/users', { username: 'testincharge12', name: 'Test Incharge 12', role: 'incharge', bus_id: bus12.id, password: 'TempIncharge123' }, csrf);
 const testInchargeId = r.data.id;
-const inch = jar();
+let inch = jar();
 r = await call(inch, 'POST', '/api/auth/login', { username: 'testincharge12', password: 'TempIncharge123' });
-ok(r.status === 200 && r.data.user.role === 'incharge' && r.data.user.home === '/bus/12', 'incharge login lands on its own portal /bus/12');
+ok(r.status === 200 && r.data.user.role === 'incharge' && r.data.user.home === '/bus/12' && !r.data.user.mustChangePassword && !r.data.user.canChangePassword, 'bus admin login lands on /bus/12 with no forced password change');
 let icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
-r = await call(inch, 'GET', '/api/incharge/state?bus=12');
-ok(r.status === 403 && r.data.code === 'PASSWORD_CHANGE_REQUIRED', 'temporary password blocks the portal until changed');
 r = await call(inch, 'POST', '/api/auth/change-password', { current: 'TempIncharge123', next: 'Incharge12fresh' }, icsrf);
-ok(r.status === 200, 'incharge changes temporary password');
+ok(r.status === 403 && r.data.code === 'PASSWORD_BY_ADMIN_ONLY', 'bus admin cannot change their own password -> 403', r.status);
+r = await call(admin, 'POST', `/api/admin/users/${testInchargeId}/password`, { password: 'Incharge12fresh' }, csrf);
+ok(r.status === 200 && r.data.generated === false, 'super admin sets the bus admin password');
+r = await call(inch, 'GET', '/api/incharge/state?bus=12');
+ok(r.status === 401, 'setting a password signs the bus admin out everywhere', r.status);
+r = await call(inch, 'POST', '/api/auth/login', { username: 'testincharge12', password: 'TempIncharge123' });
+ok(r.status === 401, 'old bus admin password no longer works');
+inch = jar();
+r = await call(inch, 'POST', '/api/auth/login', { username: 'testincharge12', password: 'Incharge12fresh' });
+ok(r.status === 200, 'bus admin signs in with the password the super admin set');
+icsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
+r = await call(admin, 'POST', `/api/admin/users/${(await call(admin, 'GET', '/api/admin/users')).data.items.find((x) => x.username === 'admin')?.id}/password`, {}, csrf);
+ok(r.status === 400, 'super admin cannot reset their own password from the staff list', r.status);
 r = await call(inch, 'GET', '/api/incharge/state?bus=12');
 ok(r.status === 200 && r.data.scopedBus?.number === '12' && r.data.buses.length === 1, 'incharge sees only its own bus portal');
 r = await call(inch, 'GET', `/api/incharge/state?bus=${encodeURIComponent(otherBus.number)}`);
@@ -202,7 +212,6 @@ r = await call(admin, 'POST', '/api/admin/users', { username: 'testinchargex', n
 const otherInchargeId = r.data.id;
 const inchX = jar();
 r = await call(inchX, 'POST', '/api/auth/login', { username: 'testinchargex', password: 'TempInchargeX1' });
-await call(inchX, 'POST', '/api/auth/change-password', { current: 'TempInchargeX1', next: 'InchargeXfresh1' }, { 'X-CSRF-Token': r.data.csrf, Origin: BASE });
 const cursorOf = async (j) => (await call(j, 'GET', '/api/events/poll?after=0')).data?.cursor; // what browsers send first
 r = await call(admin, 'GET', '/api/events/poll?after=0');
 ok(r.status === 200 && Number.isInteger(r.data.cursor), 'poll: first request (after=0) returns a cursor', r.status);
@@ -233,7 +242,11 @@ ok(r.status === 409 && r.data.code === 'ALREADY', 'phone D2 tries Aditi again ->
 r = await board(d2, S.priya);
 ok(r.status === 200 && r.data.flags.length === 0, 'phone D2 boards Priya, no flags');
 r = await board(jar(), S.tanvi);
-ok(r.status === 200 && r.data.flags.includes('wrong_bus'), 'bus-7 student boards bus 12 -> allowed but flagged wrong_bus', JSON.stringify(r.data));
+ok(r.status === 404 && r.data.code === 'NO_MATCH' && /Invalid/.test(r.data.error), 'student of another bus scanning bus 12 -> invalid', JSON.stringify(r.data));
+r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/manual`, { uuid: S.tanvi[0] }, csrf);
+ok(r.status === 409 && r.data.code === 'NOT_ON_BUS', 'manual check-in of another bus student -> refused', r.status);
+r = await call(inch, 'GET', `/api/incharge/students/search?q=${encodeURIComponent(S.tanvi[1].split(' ')[0])}&bus=${otherBus.id}`);
+ok(r.status === 200 && r.data.items.every((s) => s.bus_number === '12'), 'bus admin search only ever returns students of their own bus');
 r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/end`, {}, csrf);
 ok(r.status === 200, 'end trip 1');
 r = await call(d1, 'POST', '/api/checkin/lookup', S.aditi.length ? { uuid: S.aditi[0], name: S.aditi[1] } : {});
@@ -292,6 +305,38 @@ r = await call(admin, 'GET', '/api/admin/audit');
 ok(r.status === 200 && r.data.items.some((a) => a.action === 'checkin.manual') && r.data.items.some((a) => a.action === 'login.failed'), 'audit log records manual check-in and failed logins');
 r = await call(admin, 'POST', `/api/incharge/trips/${trip.id}/end`, {}, csrf);
 ok(r.status === 200, 'end trip 3');
+console.log('\n[operations admin: view only]');
+r = await call(admin, 'POST', '/api/admin/users', { username: 'testoperator', name: 'Test Operator', role: 'operator', password: 'OperatorPass123' }, csrf);
+ok(r.status === 201, 'super admin creates an operations admin', JSON.stringify(r.data));
+const testOperatorId = r.data.id;
+const op = jar();
+r = await call(op, 'POST', '/api/auth/login', { username: 'testoperator', password: 'OperatorPass123' });
+ok(r.status === 200 && r.data.user.role === 'operator' && r.data.user.readOnly && r.data.user.home === '/admin' && !r.data.user.mustChangePassword, 'operations admin signs in to the console, read-only');
+const ocsrf = { 'X-CSRF-Token': r.data?.csrf, Origin: BASE };
+for (const p of ['/api/admin/dashboard', '/api/admin/students', '/api/admin/buses', '/api/admin/trips', `/api/admin/trips/${trip.id}`, '/api/admin/flags', '/api/incharge/buses', `/api/incharge/state?bus=${encodeURIComponent(otherBus.number)}`, `/api/incharge/trips/${trip.id}`]) {
+  r = await call(op, 'GET', p);
+  ok(r.status === 200, `operations admin can view ${p.split('?')[0]}`, r.status);
+}
+for (const p of ['/api/admin/users', '/api/admin/audit', '/api/admin/settings', '/api/admin/students/export.csv', `/api/incharge/trips/${trip.id}/qr`]) {
+  r = await call(op, 'GET', p);
+  ok(r.status === 403, `operations admin cannot open ${p}`, r.status);
+}
+const writes = [
+  ['POST', '/api/admin/fleet', {}], ['POST', '/api/admin/demo-students', {}], ['PUT', '/api/admin/settings', { qr_mode: 'rotating' }],
+  ['POST', '/api/admin/students', { uuid: 'X1', name: 'Xx Yy' }], ['POST', '/api/incharge/trips', { bus_id: otherBus.id, direction: 'to_college' }],
+  ['POST', `/api/incharge/trips/${trip.id}/end`, {}], ['POST', `/api/incharge/trips/${trip.id}/manual`, { uuid: S.rahul[0] }],
+  ['POST', `/api/incharge/trips/${trip.id}/new-qr`, {}], ['POST', '/api/auth/change-password', { current: 'OperatorPass123', next: 'OperatorPass456' }],
+];
+for (const [m, p, body] of writes) {
+  r = await call(op, m, p, body, ocsrf);
+  ok(r.status === 403, `operations admin cannot ${m} ${p}`, r.status);
+}
+r = await call(op, 'GET', '/api/events/poll?after=0');
+ok(r.status === 200 && Number.isInteger(r.data.cursor), 'operations admin receives live updates');
+const opPage = await fetch(`${BASE}/bus/${encodeURIComponent(otherBus.number)}`, { headers: op.headers(), redirect: 'manual' });
+ok(opPage.status === 200, 'operations admin can open any bus portal page to watch it', opPage.status);
+await call(admin, 'DELETE', `/api/admin/users/${testOperatorId}`, undefined, csrf);
+
 console.log('\n[demo students]');
 r = await call(inch, 'POST', '/api/admin/demo-students', { perBus: 2 }, icsrf);
 ok(r.status === 403, 'incharge cannot add demo students -> 403', r.status);

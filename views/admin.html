@@ -3,22 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Admin · UU Bus ERP</title>
+  <title>Transport console · United University</title>
   <meta name="robots" content="noindex">
-  <meta name="theme-color" content="#4f46e5">
-  <link rel="icon" href="/icons/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0f4c87">
+  <link rel="icon" href="/img/uu-crest.png" type="image/png">
+  <script src="/js/boot.js"></script>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
+  <div class="splash" id="splash" role="presentation"><img src="/img/uu-logo.png" alt="United University, Prayagraj" width="320" height="98"><div class="tag">Bus Boarding</div><div class="bar"><i></i></div></div>
   <div class="shell">
     <aside class="sidebar" id="sidebar">
-      <div class="brand"><img src="/icons/logo.svg" alt=""><div>UU Bus ERP<span class="sub">ADMIN CONSOLE</span></div></div>
+      <div class="brand"><div><img class="logo" src="/img/uu-logo.png" alt="United University, Prayagraj" width="200" height="61"><span class="sub">Transport console</span></div></div>
       <nav class="nav" id="nav" aria-label="Main"></nav>
       <div class="foot">
-        <div class="row"><div class="avatar" id="meAvatar"></div><div class="grow"><div class="bold truncate" id="meName"></div><div class="xs muted">Administrator</div></div></div>
+        <div class="row"><div class="avatar" id="meAvatar"></div><div class="grow"><div class="bold truncate" id="meName"></div><div class="xs muted" id="meRole"></div></div></div>
         <div class="row">
-          <a class="btn sm ghost grow" href="/incharge" title="Open any bus portal as yourself">Bus portals</a>
-          <button class="btn sm ghost" id="pwBtn">Password</button>
+          <a class="btn sm ghost grow" href="/incharge" title="Open any bus portal">Bus portals</a>
+          <button class="btn sm ghost hidden" id="pwBtn">Password</button>
           <button class="btn icon sm ghost" id="logoutBtn" title="Sign out"></button>
         </div>
       </div>
@@ -29,7 +31,7 @@
         <button class="btn icon ghost menu-btn" id="menuBtn" aria-label="Menu"></button>
         <h1 id="pageTitle" class="grow">Dashboard</h1>
         <span class="pill offline" id="liveBadge">Connecting</span>
-        <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme"></button>
+        <button class="btn icon ghost" id="themeBtn" aria-label="Switch light or dark"></button>
       </div>
       <div class="content" id="content"></div>
     </div>

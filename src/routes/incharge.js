@@ -3,14 +3,16 @@ import { z } from 'zod';
 import { all, get } from '../db.js';
 import { config } from '../config.js';
 import { HttpError, validate, intParam } from '../http.js';
-import { requireAuth, canAccessBus } from '../middleware/auth.js';
+import { requireAuth, canAccessBus, operatorReadOnly } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
 import { tokenFor, dayTokenFor, regenerateDayQr, qrMode, endOfIstDay, checkinUrl, qrSvg, secondsLeftInSlot, baseUrl } from '../services/qr.js';
 import { getTrip, getTripRaw, tripSummary, startTrip, endTrip, canAccessTrip, withCounts } from '../services/trips.js';
 import { manualCheckin, studentByUuid } from '../services/checkins.js';
 
 const router = Router();
-router.use(requireAuth('incharge', 'admin'));
+router.use(requireAuth('incharge', 'admin', 'operator'));
+// Operations admins can watch any bus (state, portal list, trip roster) but get no QR and no actions.
+router.use(operatorReadOnly([/^\/state$/, /^\/buses$/, /^\/trips\/\d+$/]));
 
 const BUS_ORDER = 'ORDER BY CAST(number AS INTEGER), number';
 
@@ -44,7 +46,7 @@ router.get('/state', async (req, res) => {
     buses = [bus];
     activeIds = await all("SELECT id FROM trips WHERE status = 'active' AND bus_id = ?", bus.id);
   } else {
-    const everything = u.role === 'admin' || u.bus_id == null;
+    const everything = u.role === 'admin' || u.role === 'operator' || u.bus_id == null;
     buses = everything
       ? await all(`SELECT id, number, name, route FROM buses WHERE active = 1 ${BUS_ORDER}`)
       : await all('SELECT id, number, name, route FROM buses WHERE id = ? AND active = 1', u.bus_id);
@@ -59,7 +61,7 @@ router.get('/state', async (req, res) => {
 /** Portal picker: every bus with its live status (admins and unassigned incharges see all). */
 router.get('/buses', async (req, res) => {
   const u = req.user;
-  const scope = u.role === 'admin' || u.bus_id == null ? '' : 'AND b.id = ?';
+  const scope = u.role === 'admin' || u.role === 'operator' || u.bus_id == null ? '' : 'AND b.id = ?';
   const params = scope ? [u.bus_id] : [];
   const rows = await all(
     `SELECT b.id, b.number, b.name, b.route,
@@ -140,20 +142,26 @@ router.post('/trips/:id/manual', async (req, res) => {
   const { uuid, note } = validate(z.object({ uuid: z.string().trim().min(2).max(40), note: z.string().trim().max(200).default('') }), req.body);
   const student = await studentByUuid(uuid);
   if (!student) throw new HttpError(404, 'No active student with that ID');
+  if (student.bus_id !== trip.bus_id) throw new HttpError(409, `${student.name} is not registered on Bus ${trip.bus_number}`, { code: 'NOT_ON_BUS' });
   const r = await manualCheckin({ trip, student, byUser: req.user, note });
   await audit(req, 'checkin.manual', 'checkin', r.id, `${student.uuid} ${student.name} on trip ${trip.id}${note ? ` — ${note}` : ''}`);
   res.status(201).json({ ok: true, boardedAt: r.at, flags: r.flags, student: { id: student.id, uuid: student.uuid, name: student.name, stop: student.stop_name || '' } });
 });
 
+/** Manual check-in search: only students registered on that bus (a bus admin never sees other buses' students). */
 router.get('/students/search', async (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 60);
+  const u = req.user;
+  const busId = u.role === 'incharge' && u.bus_id ? u.bus_id : req.query.bus ? intParam(req.query.bus, 'bus') : null;
+  if (!busId) throw new HttpError(400, 'Pick a bus');
+  if (!canAccessBus(u, busId)) throw new HttpError(403, 'That is not your bus');
   if (q.length < 2) return res.json({ items: [] });
   const like = `%${q.replace(/[%_]/g, '')}%`;
   const items = await all(
     `SELECT s.id, s.uuid, s.name, s.course, s.year, st.name AS stop, b.number AS bus_number
        FROM students s LEFT JOIN stops st ON st.id = s.stop_id LEFT JOIN buses b ON b.id = s.bus_id
-      WHERE s.active = 1 AND (s.uuid LIKE ? OR s.name LIKE ?) ORDER BY s.name COLLATE NOCASE LIMIT 12`,
-    like, like,
+      WHERE s.active = 1 AND s.bus_id = ? AND (s.uuid LIKE ? OR s.name LIKE ?) ORDER BY s.name COLLATE NOCASE LIMIT 12`,
+    busId, like, like,
   );
   res.json({ items });
 });

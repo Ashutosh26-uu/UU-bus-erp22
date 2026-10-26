@@ -57,8 +57,8 @@ export const api = {
 let toastRoot = null;
 export function toast(message, type = 'info', ms = 3600) {
   if (!toastRoot) { toastRoot = el('<div class="toasts" aria-live="polite"></div>'); document.body.appendChild(toastRoot); }
-  const icons = { info: 'ℹ️', success: '✅', error: '⚠️', warn: '⚠️' };
-  const t = el(`<div class="toast ${type}"><span>${icons[type] || ''}</span><div>${esc(message)}</div></div>`);
+  const icons = { info: ICONS.info, success: ICONS.checkCircle, error: ICONS.alert, warn: ICONS.alert };
+  const t = el(`<div class="toast ${type}">${icons[type] || ICONS.info}<div>${esc(message)}</div></div>`);
   toastRoot.appendChild(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, ms);
   return t;
@@ -130,10 +130,9 @@ export const theme = {
   init() {
     try { const t = localStorage.getItem('uu_theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* ignore */ }
   },
+  // light unless the user picked dark (boot.js applies the saved choice before the page paints)
   current() {
-    const set = document.documentElement.dataset.theme;
-    if (set) return set;
-    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   },
   toggle() {
     const next = this.current() === 'dark' ? 'light' : 'dark';
@@ -233,7 +232,9 @@ export function fmtRel(ms) {
 }
 export const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
 export const directionLabel = (d) => (d === 'to_college' ? 'To college' : d === 'from_college' ? 'From college' : d || '');
-export const directionIcon = (d) => (d === 'to_college' ? '🏫' : '🏠');
+/** An inline line icon with the small inline-icon class (ICONS entries are plain <svg> strings). */
+export const icon = (name, cls = 'ico') => (ICONS[name] || '').replace('<svg ', `<svg class="${cls}" aria-hidden="true" `);
+export const directionIcon = (d) => icon(d === 'to_college' ? 'school' : 'home');
 
 const FLAG_INFO = {
   new_device: ['warn', 'New phone', 'Checked in from a phone not used before'],
@@ -262,6 +263,9 @@ export async function requireStaff(roles) {
   api.csrf = me.csrf;
   api.liveMode = me.live || 'sse';
   api.pollMs = me.pollMs || 2500;
+  api.user = me.user;
+  // operations admins: hide every write control (class "w"); the server refuses them anyway
+  document.body.classList.toggle('read-only', !!me.user.readOnly);
   if (roles && !roles.includes(me.user.role)) { location.href = '/'; return null; }
   if (me.user.mustChangePassword) await forcePasswordChange();
   return me.user;
@@ -304,6 +308,26 @@ export async function logout() {
 
 // ------------------------------------------------------------------ icons (inline SVG, CSP friendly)
 export const ICONS = {
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+  school: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-5 10 5-10 5z"/><path d="M6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5M22 9v6"/></svg>',
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10M10 20v-6h4v6"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+  bellOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 3.6A6 6 0 0 1 18 8c0 3.2.6 5.4 1.4 6.8M17 17H3s3-2 3-9c0-.4 0-.8.1-1.2M10.3 21a1.9 1.9 0 0 0 3.4 0M2 2l20 20"/></svg>',
+  idcard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16a3 3 0 0 1 6 0M14 10h4M14 14h3"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20"/><circle cx="10" cy="8" r="3.5"/><path d="M20 20v-1.5a3.5 3.5 0 0 0-2.5-3.4M15.5 4.6a3.5 3.5 0 0 1 0 6.8"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+  phoneOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2M3 3l18 18"/></svg>',
+  ban: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>',
+  wifiOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l20 20M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.3-1.7M12 20h.01M1.5 8.8A15 15 0 0 1 6.3 6M22.5 8.8A15 15 0 0 0 11 4.6"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9V3h10v6M7 17H4v-7h16v7h-3"/><rect x="7" y="14" width="10" height="7"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>',
+  eyeView: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',

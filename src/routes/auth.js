@@ -64,6 +64,9 @@ router.post('/change-password', requireAuthPendingOk(), async (req, res) => {
     z.object({ current: z.string().min(1).max(128), next: z.string().min(1).max(128) }),
     req.body,
   );
+  if (req.user.role !== 'admin') {
+    throw new HttpError(403, 'Only the super admin can change this account\'s password. Ask them to set a new one for you.', { code: 'PASSWORD_BY_ADMIN_ONLY' });
+  }
   const user = await get('SELECT * FROM users WHERE id = ?', req.user.id);
   if (!verifyPassword(current, user.password_hash)) throw new HttpError(400, 'Current password is wrong');
   const problem = passwordProblem(next);

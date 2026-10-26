@@ -86,13 +86,15 @@ router.post('/lookup', lookupLimiter, async (req, res) => {
   // count the attempt atomically first, so parallel guesses cannot slip past the limit
   const used = await run('UPDATE checkin_sessions SET lookups = lookups + 1 WHERE id = ? AND lookups < ?', s.id, MAX_LOOKUPS);
   if (!used.changes) throw new HttpError(429, 'Too many wrong attempts. Scan the QR again and check your details with the incharge.', { code: 'LOOKUPS_EXHAUSTED' });
-  const student = await lookupStudent(uuid, name);
+  const trip = await getTrip(s.trip_id);
+  const found = await lookupStudent(uuid, name);
+  // only students registered on THIS bus can board it; anyone else is simply "invalid"
+  const student = found && found.bus_id === trip.bus_id ? found : null;
   if (!student) {
     const left = MAX_LOOKUPS - s.lookups - 1;
-    throw new HttpError(404, `No student matches that ID and name.${left > 0 ? ` ${left} attempt${left === 1 ? '' : 's'} left.` : ''}`, { code: 'NO_MATCH', attemptsLeft: left });
+    throw new HttpError(404, `Invalid. No student with this ID and name is registered on Bus ${trip.bus_number}.${left > 0 ? ` ${left} attempt${left === 1 ? '' : 's'} left.` : ''}`, { code: 'NO_MATCH', attemptsLeft: left });
   }
   await run('UPDATE checkin_sessions SET student_id = ? WHERE id = ?', student.id, s.id);
-  const trip = await getTrip(s.trip_id);
   const already = await get('SELECT created_at FROM checkins WHERE trip_id = ? AND student_id = ?', trip.id, student.id);
   res.json({ student: publicStudent(student, trip), trip: publicTrip(trip), boardedAt: already?.created_at ?? null });
 });

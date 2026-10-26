@@ -3,35 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Sign in · UU Bus ERP</title>
+  <title>Staff sign in · United University Bus Boarding</title>
   <meta name="robots" content="noindex">
-  <link rel="icon" href="/icons/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0f4c87">
+  <link rel="icon" href="/img/uu-crest.png" type="image/png">
+  <script src="/js/boot.js"></script>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-  <main class="auth">
-    <div class="card pad-lg">
-      <div class="brand">
-        <img src="/icons/logo.svg" alt="">
-        <div>UU Bus ERP<span class="sub">STAFF SIGN IN</span></div>
+  <div class="splash" id="splash" role="presentation"><img src="/img/uu-logo.png" alt="United University, Prayagraj" width="320" height="98"><div class="tag">Bus Boarding</div><div class="bar"><i></i></div></div>
+  <main class="auth-split">
+    <section class="auth-photo" aria-hidden="true">
+      <div class="caption">
+        <div class="rule"></div>
+        <h2>Campus transport</h2>
+        <p>Boarding for every university bus, checked at the door with that bus's own QR code.</p>
       </div>
-      <form id="loginForm" class="stack" autocomplete="on">
-        <div class="field">
-          <label for="username">Username</label>
-          <input class="input lg" id="username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus>
+    </section>
+    <section class="auth-panel">
+      <div class="auth-card">
+        <img class="logo" src="/img/uu-logo.png" alt="United University, Prayagraj" width="230" height="71">
+        <div class="heading">
+          <h1>Staff sign in</h1>
+          <p>Transport office, operations team and bus admins.</p>
         </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <div class="input-wrap">
-            <input class="input lg" id="password" name="password" type="password" autocomplete="current-password" required>
-            <button class="btn icon" type="button" id="togglePw" aria-label="Show password"></button>
+        <form id="loginForm" class="stack" autocomplete="on">
+          <div class="field">
+            <label for="username">Username</label>
+            <input class="input lg" id="username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
           </div>
-        </div>
-        <div class="error-text" data-error hidden></div>
-        <button class="btn primary lg block" type="submit">Sign in</button>
-        <p class="help center">Students do not sign in — just scan the QR on the bus screen.</p>
-      </form>
-    </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="input-wrap">
+              <input class="input lg" id="password" name="password" type="password" autocomplete="current-password" required>
+              <button class="btn icon" type="button" id="togglePw" aria-label="Show password"></button>
+            </div>
+          </div>
+          <div class="error-text" data-error hidden></div>
+          <button class="btn primary lg block" type="submit">Sign in</button>
+        </form>
+        <p class="help">Students don't need an account. Scan the QR code inside your bus.</p>
+      </div>
+    </section>
   </main>
   <script type="module" src="/js/login.js"></script>
 </body>

@@ -251,6 +251,41 @@ const MIGRATIONS = [
     reset_at INTEGER NOT NULL
   );
   `,
+  // v3: new 'operator' role (operations admin, read-only). SQLite cannot alter a CHECK constraint,
+  // so the users table is rebuilt with every row, id and session intact. Bus admins and operators
+  // can no longer change their own password, so their "must change" flag is cleared.
+  // Runs as one script with its own transaction (foreign keys paused so the swap cannot cascade).
+  {
+    version: 3,
+    script: `
+      PRAGMA foreign_keys = OFF;
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS users_v3 (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('admin','operator','incharge')),
+        password_hash TEXT NOT NULL,
+        bus_id INTEGER REFERENCES buses(id) ON DELETE SET NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        must_change_password INTEGER NOT NULL DEFAULT 0,
+        failed_logins INTEGER NOT NULL DEFAULT 0,
+        locked_until INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO users_v3 (id, username, name, role, password_hash, bus_id, active, must_change_password, failed_logins, locked_until, created_at, updated_at)
+        SELECT id, username, name, role, password_hash, bus_id, active,
+               CASE WHEN role = 'admin' THEN must_change_password ELSE 0 END,
+               failed_logins, locked_until, created_at, updated_at
+          FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_v3 RENAME TO users;
+      UPDATE schema_version SET version = 3 WHERE version < 3;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `,
+  },
 ];
 const splitSql = (sql) => sql.split(/;\s*\n/).map((s) => s.trim().replace(/;$/, '')).filter(Boolean);
 
@@ -260,7 +295,19 @@ export async function migrate() {
   await d.run('INSERT INTO schema_version(version) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM schema_version)', []);
   let version = (await d.get('SELECT MAX(version) AS v FROM schema_version', []))?.v ?? 0;
   for (let i = version; i < MIGRATIONS.length; i++) {
-    await d.batch([...splitSql(MIGRATIONS[i]), `UPDATE schema_version SET version = ${i + 1} WHERE version < ${i + 1}`]);
+    const m = MIGRATIONS[i];
+    if (typeof m === 'string') {
+      await d.batch([...splitSql(m), `UPDATE schema_version SET version = ${i + 1} WHERE version < ${i + 1}`]);
+    } else {
+      // table rebuilds: a script with its own transaction and version bump
+      try {
+        await d.exec(m.script);
+      } catch (e) {
+        try { await d.exec('ROLLBACK'); } catch { /* nothing open */ }
+        try { await d.exec('PRAGMA foreign_keys = ON'); } catch { /* ignore */ }
+        throw e;
+      }
+    }
     version = i + 1;
   }
   return version;

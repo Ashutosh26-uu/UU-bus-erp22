@@ -7,26 +7,39 @@ export const SESSION_COOKIE = 'uu_sid';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const ABSOLUTE_MAX_MS = 7 * 86_400_000; // no session lives longer than a week, whatever the activity
 
+/*
+ * Roles
+ *  admin     Super admin: everything, including every password.
+ *  operator  Operations admin: sees every bus live, changes nothing (read-only everywhere).
+ *  incharge  Bus admin: runs one bus. Cannot change their own password; only the super admin can.
+ */
+export const ROLE_LABELS = { admin: 'Super admin', operator: 'Operations admin', incharge: 'Bus admin' };
+
 export const publicUser = (u) => ({
   id: u.id,
   username: u.username,
   name: u.name,
   role: u.role,
+  roleLabel: ROLE_LABELS[u.role] || u.role,
   bus_id: u.bus_id,
   bus_number: u.bus_number ?? null,
-  mustChangePassword: !!u.must_change_password,
+  // only super admins choose their own password, so only they can be asked to change it
+  mustChangePassword: u.role === 'admin' && !!u.must_change_password,
+  canChangePassword: u.role === 'admin',
+  readOnly: u.role === 'operator',
   home: homeFor(u),
 });
 
 /** Where this user lands after sign-in: admin console, their own bus portal, or the portal picker. */
 export function homeFor(u) {
-  if (u.role === 'admin') return '/admin';
+  if (u.role === 'admin' || u.role === 'operator') return '/admin';
   if (u.bus_number) return `/bus/${encodeURIComponent(u.bus_number)}`;
   return '/incharge';
 }
 
-/** Can this user operate this bus's portal? Admins and unassigned incharges can use any bus. */
-export const canAccessBus = (user, busId) => user.role === 'admin' || user.bus_id == null || user.bus_id === busId;
+/** Can this user see this bus's portal? Super/operations admins and unassigned bus admins see any bus. */
+export const canAccessBus = (user, busId) =>
+  user.role === 'admin' || user.role === 'operator' || user.bus_id == null || user.bus_id === busId;
 
 /** Attach req.user / req.session when a valid session cookie is present. */
 export async function loadSession(req, res, next) {
@@ -81,6 +94,18 @@ export function requireAuth(...roles) {
       throw new HttpError(403, 'You must change your password first', { code: 'PASSWORD_CHANGE_REQUIRED' });
     }
     next();
+  };
+}
+
+/**
+ * Operations admins are read-only: let them through only for GET requests matching `allowed`
+ * (paths relative to the router). Everything else gets 403.
+ */
+export function operatorReadOnly(allowed) {
+  return (req, res, next) => {
+    if (req.user?.role !== 'operator') return next();
+    if (req.method === 'GET' && allowed.some((re) => re.test(req.path))) return next();
+    throw new HttpError(403, 'Operations admins can view but not change anything', { code: 'READ_ONLY' });
   };
 }
 

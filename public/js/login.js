@@ -5,6 +5,8 @@ const pw = $('#password');
 const toggle = $('#togglePw');
 toggle.innerHTML = ICONS.eye;
 toggle.addEventListener('click', () => { pw.type = pw.type === 'password' ? 'text' : 'password'; });
+// focus the username box on wide screens only; on phones it would pop the keyboard over the photo
+if (matchMedia('(min-width: 861px)').matches) $('#username').focus();
 
 formHandler(form, $('button[type=submit]', form), async (v) => {
   const r = await api.post('/api/auth/login', { username: v.username, password: v.password });
